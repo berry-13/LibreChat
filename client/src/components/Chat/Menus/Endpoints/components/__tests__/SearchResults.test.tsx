@@ -34,6 +34,31 @@ jest.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
 }));
 
+jest.mock('~/hooks', () => ({
+  useFavorites: () => ({
+    isFavoriteModel: () => false,
+    toggleFavoriteModel: jest.fn(),
+    isFavoriteAgent: () => false,
+    toggleFavoriteAgent: jest.fn(),
+  }),
+}));
+
+const mockVirtualizedModelList = jest.fn();
+jest.mock('../VirtualizedModelList', () => {
+  const React = jest.requireActual<typeof import('react')>('react');
+  return {
+    __esModule: true,
+    default: (props: { modelIds: string[] }) => {
+      mockVirtualizedModelList(props);
+      return React.createElement(
+        'div',
+        { 'data-testid': 'virtualized-list' },
+        props.modelIds.length,
+      );
+    },
+  };
+});
+
 jest.mock('../SpecIcon', () => {
   const React = jest.requireActual<typeof import('react')>('react');
   return {
@@ -146,6 +171,50 @@ describe('SearchResults', () => {
     fireEvent.click(item);
     expect(mockNavigate).toHaveBeenCalledWith('/agents');
     expect(mockHandleSelectModel).not.toHaveBeenCalled();
+  });
+
+  it('renders every matching row directly at or below the virtualization threshold', () => {
+    mockSelectedValues = { endpoint: '', model: '', modelSpec: '' };
+    const models = Array.from({ length: 100 }, (_, i) => ({
+      name: `agent-${i}`,
+      isGlobal: i % 2 === 0,
+    }));
+    render(
+      <SearchResults
+        results={[{ ...agentsMarketplaceEndpoint, showMarketplace: false, models }]}
+        localize={localize}
+        searchValue="agent"
+      />,
+    );
+
+    expect(screen.queryByTestId('virtualized-list')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('menuitem')).toHaveLength(100);
+  });
+
+  it('windows the rows when a search matches more than the virtualization threshold', () => {
+    mockSelectedValues = { endpoint: '', model: '', modelSpec: '' };
+    const models = Array.from({ length: 101 }, (_, i) => ({
+      name: `agent-${i}`,
+      isGlobal: i === 3,
+    }));
+    render(
+      <SearchResults
+        results={[{ ...agentsMarketplaceEndpoint, models }]}
+        localize={localize}
+        searchValue="agent"
+      />,
+    );
+
+    expect(screen.getByTestId('virtualized-list')).toHaveTextContent('101');
+    expect(mockVirtualizedModelList).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelIds: models.map((m) => m.name),
+        precedingOptionCount: 1,
+      }),
+    );
+    const { globalByName } = mockVirtualizedModelList.mock.calls[0][0];
+    expect(globalByName.get('agent-3')).toBe(true);
+    expect(globalByName.get('agent-4')).toBe(false);
   });
 
   it('does not render agents as a selectable endpoint when marketplace and agent rows are unavailable', () => {
