@@ -12,9 +12,10 @@
 #   bench-ci.sh status                   state of the benchmark runs
 #   bench-ci.sh report [jobs.csv]        timing tables (markdown), optional per-job CSV
 #
-# Pass 1 on a branch is the cold-cache run, later passes are warm. Dispatch a pass,
-# wait until `status` shows nothing in progress, then dispatch the next one: most
-# workflows cancel an in-flight run on the same branch.
+# Pass 1 of a workflow on a branch is the cold-cache run, later passes are warm. A
+# workflow that still has a run in progress on a branch is skipped, because most of
+# them cancel an in-flight run on the same branch. Use the name filter to stagger
+# workflows so a pass stays under the provider's concurrent-job cap.
 set -euo pipefail
 
 REPO="${BENCH_REPO:-berry-13/LibreChat}"
@@ -42,22 +43,21 @@ list_runs() { # <ref> -> one JSON object per run
     -q '.workflow_runs[] | {id, path, name, status, conclusion, created_at, run_attempt}'
 }
 
-active_runs() { # <ref> -> count of runs not yet completed
-  list_runs "$1" | jq -s '[.[] | select(.status != "completed")] | length'
+active_runs() { # <ref> <workflow file> -> count of that workflow's unfinished runs
+  list_runs "$1" | jq -s --arg path ".github/workflows/$2" \
+    '[.[] | select(.path == $path and .status != "completed")] | length'
 }
 
 cmd_dispatch() {
   local filter="${1:-}" ref entry file
-  for ref in "$REF_GITHUB" "$REF_AVREA"; do
-    if [ "$(active_runs "$ref")" -ne 0 ]; then
-      echo "Runs are still in progress on $ref; wait for them (bench-ci.sh status) before the next pass." >&2
-      exit 1
-    fi
-  done
   for entry in "${WORKFLOWS[@]}"; do
     file="${entry%% *}"
     case "$file" in *"$filter"*) ;; *) continue ;; esac
     for ref in "$REF_GITHUB" "$REF_AVREA"; do
+      if [ "$(active_runs "$ref" "$file")" -ne 0 ]; then
+        echo "skip $file on $ref: its previous run is still in progress" >&2
+        continue
+      fi
       echo "dispatch $file on $ref"
       # shellcheck disable=SC2086 # extra args are a fixed, space-separated list from WORKFLOWS
       gh workflow run "$file" -R "$REPO" --ref "$ref" ${entry#"$file"}
@@ -171,5 +171,5 @@ case "${1:-}" in
   dispatch) shift; cmd_dispatch "$@" ;;
   status) cmd_status ;;
   report) shift; cmd_report "$@" ;;
-  *) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
