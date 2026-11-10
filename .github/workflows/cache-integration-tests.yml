@@ -1,6 +1,8 @@
 name: Cache Integration Tests
 
 on:
+  # Benchmark-only: lets the bench script run this workflow on demand.
+  workflow_dispatch:
   pull_request:
     branches:
       - main

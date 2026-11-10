@@ -8,6 +8,8 @@ name: Integration Tests
 # without this job they run nowhere and their regressions guard nothing. Selection is by
 # suffix, not folder, so a suite added anywhere under src is picked up.
 on:
+  # Benchmark-only: lets the bench script run this workflow on demand.
+  workflow_dispatch:
   pull_request:
     branches:
       - main

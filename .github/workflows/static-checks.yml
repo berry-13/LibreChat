@@ -1,6 +1,8 @@
 name: Static Checks
 
 on:
+  # Benchmark-only: lets the bench script run this workflow on demand.
+  workflow_dispatch:
   pull_request:
     paths:
       - 'api/**'
@@ -31,6 +33,9 @@ concurrency:
 
 env:
   NODE_ENV: CI
+  # Benchmark-only: a manual run has no pull request, so the changed-file steps diff
+  # against this fixed dev commit instead (10 commits behind the benchmarked head).
+  BENCH_BASE_SHA: 876f3aad1a7e3ddb2f24f5c8048bb555707febd3
   NODE_OPTIONS: '--max-old-space-size=${{ secrets.NODE_MAX_OLD_SPACE_SIZE || 6144 }}'
 
 jobs:
@@ -228,7 +233,7 @@ jobs:
         continue-on-error: true
         run: |
           # Extract the base commit SHA from the pull_request event payload.
-          BASE_SHA=$(jq --raw-output .pull_request.base.sha "$GITHUB_EVENT_PATH")
+          BASE_SHA=$(jq --raw-output '.pull_request.base.sha // env.BENCH_BASE_SHA' "$GITHUB_EVENT_PATH")
           echo "Base commit SHA: $BASE_SHA"
 
           # Get changed files (only JS/TS files in api/, client/, or packages/)
@@ -273,7 +278,7 @@ jobs:
         if: always() && steps.paths.outputs.eslint == 'true'
         continue-on-error: true
         run: |
-          BASE_SHA=$(jq --raw-output .pull_request.base.sha "$GITHUB_EVENT_PATH")
+          BASE_SHA=$(jq --raw-output '.pull_request.base.sha // env.BENCH_BASE_SHA' "$GITHUB_EVENT_PATH")
           mapfile -d '' -t CHANGED_FILES < <(
             git diff -z --name-only --diff-filter=ACMRTUXB "$BASE_SHA" HEAD |
               grep -zE '^(api|client|packages)/.*\.(js|jsx|ts|tsx)$' || true
@@ -306,7 +311,7 @@ jobs:
         if: always() && steps.paths.outputs.eslint == 'true'
         continue-on-error: true
         run: |
-          BASE_SHA=$(jq --raw-output .pull_request.base.sha "$GITHUB_EVENT_PATH")
+          BASE_SHA=$(jq --raw-output '.pull_request.base.sha // env.BENCH_BASE_SHA' "$GITHUB_EVENT_PATH")
           mapfile -d '' -t CHANGED_FILES < <(
             git diff -z --name-only --diff-filter=ACMRTUXB "$BASE_SHA" HEAD |
               grep -zE '^(api|client|packages)/.*\.(js|jsx|ts|tsx)$' || true
@@ -351,7 +356,7 @@ jobs:
         if: always() && steps.paths.outputs.runner == 'true'
         continue-on-error: true
         run: |
-          BASE_SHA=$(jq --raw-output .pull_request.base.sha "$GITHUB_EVENT_PATH")
+          BASE_SHA=$(jq --raw-output '.pull_request.base.sha // env.BENCH_BASE_SHA' "$GITHUB_EVENT_PATH")
           node scripts/static-checks.mts --against "$BASE_SHA" --list
           # An explicit target, because --list never executes a check and a
           # script-only PR activates no group — so neither would exercise the
@@ -380,7 +385,7 @@ jobs:
           # --against the PR base, not just the baseline path: the check also asks
           # whether the changed files still owe what they record, and that needs
           # the diff rather than one file name.
-          BASE_SHA=$(jq --raw-output .pull_request.base.sha "$GITHUB_EVENT_PATH")
+          BASE_SHA=$(jq --raw-output '.pull_request.base.sha // env.BENCH_BASE_SHA' "$GITHUB_EVENT_PATH")
           node scripts/static-checks.mts --against "$BASE_SHA" --only suppressions
 
       - name: Check CSS colour literals
@@ -388,7 +393,7 @@ jobs:
         if: always() && steps.paths.outputs.css_colors == 'true'
         continue-on-error: true
         run: |
-          BASE_SHA=$(jq --raw-output .pull_request.base.sha "$GITHUB_EVENT_PATH")
+          BASE_SHA=$(jq --raw-output '.pull_request.base.sha // env.BENCH_BASE_SHA' "$GITHUB_EVENT_PATH")
           node scripts/static-checks.mts --against "$BASE_SHA" --only css-colors
 
       - name: Restore data-provider build cache
@@ -894,7 +899,7 @@ jobs:
             exit 1
           fi
 
-          BASE_SHA=$(jq --raw-output .pull_request.base.sha "$GITHUB_EVENT_PATH")
+          BASE_SHA=$(jq --raw-output '.pull_request.base.sha // env.BENCH_BASE_SHA' "$GITHUB_EVENT_PATH")
           if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
             echo "::error title=ESLint sweep::Base commit is unavailable — this gate requires the checkout above to keep fetch-depth: 0."
             exit 1

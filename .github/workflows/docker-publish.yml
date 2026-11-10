@@ -42,13 +42,14 @@ on:
         default: 90
     secrets:
       DOCKERHUB_USERNAME:
-        required: true
+        required: false
       DOCKERHUB_TOKEN:
-        required: true
+        required: false
 
+# BENCHMARK BRANCH: this copy builds every image but never publishes. There is no
+# registry login, no push, no manifest merge, and the token cannot write packages.
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build:
@@ -74,19 +75,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Prepare environment
         run: cp .env.example .env
 
@@ -104,11 +92,10 @@ jobs:
           printf 'BUILD_BRANCH=%s\n' "$BUILD_BRANCH_INPUT" >> "$GITHUB_ENV"
           printf 'BUILD_DATE=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
 
-      # The layer cache lives in GHCR beside the image: no 10GB Actions-cache cap,
-      # and readable from every branch and workflow, unlike type=gha which is
-      # branch-scoped. The ref is per-architecture so the platform jobs cannot
-      # clobber each other's cache manifest.
-      - name: Build and push by digest
+      # Layer cache uses the Actions cache backend rather than GHCR, so nothing is
+      # written to a registry. The OCI archive output forces the same layer
+      # compression a push would do, without uploading the image anywhere.
+      - name: Build without pushing
         id: build
         uses: docker/build-push-action@v7
         with:
@@ -116,129 +103,10 @@ jobs:
           file: ${{ matrix.image.file }}
           platforms: linux/${{ matrix.arch }}
           target: ${{ matrix.image.target }}
-          cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache-${{ matrix.arch }}
-          cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache-${{ matrix.arch }},mode=max
-          outputs: type=image,"name=${{ env.GHCR_IMAGE }},docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image.image_name }}",push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=bench-${{ matrix.image.image_name }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=bench-${{ matrix.image.image_name }}-${{ matrix.arch }}
+          outputs: type=oci,dest=${{ runner.temp }}/image.tar
           build-args: |
             BUILD_COMMIT=${{ env.BUILD_COMMIT }}
             BUILD_BRANCH=${{ env.BUILD_BRANCH }}
             BUILD_DATE=${{ env.BUILD_DATE }}
-
-      - name: Export digest
-        env:
-          BUILD_DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/digests
-          digest="$BUILD_DIGEST"
-          if [ -z "$digest" ]; then
-            echo "Build produced no digest." >&2
-            exit 1
-          fi
-          touch "/tmp/digests/${digest#sha256:}"
-
-      # The `-arch-` separator keeps one image's artifacts out of another's glob.
-      # Image names commonly prefix one another (`librechat` / `librechat-api`,
-      # `lc-dev` / `lc-dev-api`), and a bare `digests-<image>-*` pattern matches
-      # both, which is exactly the failure in #15446.
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-${{ matrix.image.image_name }}-arch-${{ matrix.arch }}
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
-          # A full re-run (retry-docker-builds uses `rerun` when a job was
-          # cancelled) keeps the run id, and v4 refuses to upload over an existing
-          # artifact name. Overwrite instead of qualifying the name by
-          # run_attempt: `rerun-failed-jobs` re-runs the merge alone, which must
-          # still find the digests the earlier attempt's build legs uploaded.
-          overwrite: true
-
-  merge:
-    name: Merge manifests (${{ matrix.image.image_name }})
-    runs-on: ubuntu-latest
-    needs: build
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        image: ${{ fromJSON(inputs.images) }}
-
-    steps:
-      # Registry names must be lowercase, and the repository owner is not guaranteed to be.
-      - name: Resolve GHCR image name
-        env:
-          IMAGE_NAME: ${{ matrix.image.image_name }}
-        run: printf 'GHCR_IMAGE=ghcr.io/%s/%s\n' "${GITHUB_REPOSITORY_OWNER,,}" "$IMAGE_NAME" >> "$GITHUB_ENV"
-
-      - name: Download digests
-        uses: actions/download-artifact@v7
-        with:
-          pattern: digests-${{ matrix.image.image_name }}-arch-*
-          merge-multiple: true
-          path: /tmp/digests
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      # The digests are identical across registries (manifests are content-addressed),
-      # so the same set sources both manifest lists.
-      - name: Create manifest lists and push
-        working-directory: /tmp/digests
-        env:
-          DOCKERHUB_IMAGE: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image.image_name }}
-          EXPECTED_ARCHES: ${{ join(fromJSON(inputs.arches), ' ') }}
-          TAG_SUFFIXES: ${{ inputs.tag_suffixes }}
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-
-          # One digest per architecture. Assert the exact count: too few would
-          # publish a manifest missing an architecture, too many means the artifact
-          # glob crossed images (#15446). The old guard only rejected an empty
-          # directory, which is why four digests sailed through.
-          expected=$(wc -w <<< "$EXPECTED_ARCHES")
-          digests=(*)
-          if [ "${#digests[@]}" -ne "$expected" ]; then
-            echo "Expected $expected platform digests ($EXPECTED_ARCHES), found ${#digests[@]}: ${digests[*]}" >&2
-            exit 1
-          fi
-
-          tag_args=()
-          while IFS= read -r suffix; do
-            [ -n "$suffix" ] || continue
-            tag_args+=(-t "IMAGE:${suffix}")
-          done <<< "$TAG_SUFFIXES"
-          if [ "${#tag_args[@]}" -eq 0 ]; then
-            echo "No tag suffixes supplied; refusing to publish an untagged manifest." >&2
-            exit 1
-          fi
-
-          echo "Merging ${#digests[@]} digests into $(( ${#tag_args[@]} / 2 )) tag(s) per registry"
-          for image in "$GHCR_IMAGE" "$DOCKERHUB_IMAGE"; do
-            docker buildx imagetools create \
-              "${tag_args[@]/IMAGE:/${image}:}" \
-              "${digests[@]/#/${image}@sha256:}"
-          done
-
-      - name: Inspect image
-        env:
-          TAG_SUFFIXES: ${{ inputs.tag_suffixes }}
-        run: |
-          set -euo pipefail
-          first_tag=$(grep -m1 -v '^[[:space:]]*$' <<< "$TAG_SUFFIXES")
-          docker buildx imagetools inspect "${GHCR_IMAGE}:${first_tag}"
