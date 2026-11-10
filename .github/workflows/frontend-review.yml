@@ -52,7 +52,7 @@ env:
 jobs:
   client-build-regression:
     name: Client build recovery regression
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
@@ -110,7 +110,7 @@ jobs:
   # testPathIgnorePatterns, so --runTestsByPath needs no exclude mirroring here.
   codegraph_select:
     name: Codegraph select
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 5
     if: >-
       github.event_name == 'pull_request' &&
@@ -202,7 +202,7 @@ jobs:
 
   build:
     name: Build packages
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
@@ -279,7 +279,7 @@ jobs:
   typecheck:
     name: TypeScript type checks (client)
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -336,7 +336,7 @@ jobs:
     name: 'Tests: @librechat/chat'
     needs: build
     if: ${{ !cancelled() && needs.build.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -393,7 +393,7 @@ jobs:
     if: >-
       !cancelled() && needs.build.result == 'success' &&
       needs.codegraph_select.outputs.clientpkg_run != 'false'
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -472,7 +472,7 @@ jobs:
     if: >-
       !cancelled() && needs.build.result == 'success' &&
       needs.codegraph_select.outputs.client_run != 'false'
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -559,7 +559,7 @@ jobs:
   build-verify:
     name: Vite build verification
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5

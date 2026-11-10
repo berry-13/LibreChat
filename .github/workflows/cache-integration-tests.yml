@@ -35,7 +35,7 @@ jobs:
   cache_integration_tests:
     name: Integration Tests that use actual Redis Cache
     timeout-minutes: 30
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
 
     steps:
       - name: Checkout repository

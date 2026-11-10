@@ -44,7 +44,7 @@ jobs:
   # earns both lanes. Kill switch: repo variable CODEGRAPH_GATING=off.
   codegraph_select:
     name: Codegraph select
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 5
     if: >-
       github.event_name == 'pull_request' &&
@@ -167,7 +167,7 @@ jobs:
       github.event.pull_request != null &&
       (contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association) ||
       github.event.pull_request.head.repo.full_name == github.repository)))
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 30
     # Separate runners isolate each shard's user, MongoDB, Redis and fixture state.
     # Keep workers: 1 in Playwright; shared-user cleanup is not worker-safe.
@@ -441,7 +441,7 @@ jobs:
       github.event.pull_request != null &&
       (contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association) ||
       github.event.pull_request.head.repo.full_name == github.repository)))
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -594,7 +594,7 @@ jobs:
       github.event.pull_request != null &&
       (contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association) ||
       github.event.pull_request.head.repo.full_name == github.repository))
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 45
     env:
       CI: 'true'
@@ -676,7 +676,7 @@ jobs:
       (contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association) ||
       github.event.pull_request.head.repo.full_name == github.repository)))
     needs: [codegraph_select, e2e_shards, mcp_tool_list_changed, mcp_apps]
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     steps:
       # A codegraph-skipped MCP lane reports `skipped`; that is a decision, not a failure.
       - name: Verify every Playwright job passed

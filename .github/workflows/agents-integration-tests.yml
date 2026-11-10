@@ -40,7 +40,7 @@ jobs:
   agents_integration_tests:
     name: Integration Tests (MongoDB and Redis)
     timeout-minutes: 20
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
 
     services:
       redis:

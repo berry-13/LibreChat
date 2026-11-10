@@ -50,7 +50,7 @@ env:
 jobs:
   build:
     name: Build packages
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
@@ -142,7 +142,7 @@ jobs:
   # is "CI runs everything", which is the pre-gating behavior.
   codegraph_select:
     name: Codegraph select
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 5
     if: >-
       github.event_name == 'pull_request' &&
@@ -259,7 +259,7 @@ jobs:
   typecheck:
     name: TypeScript type checks
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -328,7 +328,7 @@ jobs:
 
   circular-deps:
     name: Circular dependency checks
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -361,7 +361,7 @@ jobs:
     name: 'Tests: api (shard ${{ matrix.shard }}/3)'
     needs: [build, codegraph_select]
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.codegraph_select.outputs.api_run != 'false' }}
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -484,7 +484,7 @@ jobs:
     name: 'Tests: data-provider'
     needs: [build, codegraph_select]
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.codegraph_select.outputs.dataprovider_run != 'false' }}
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -569,7 +569,7 @@ jobs:
     name: 'Tests: data-schemas'
     needs: [build, codegraph_select]
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.codegraph_select.outputs.dataschemas_run != 'false' }}
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -660,7 +660,7 @@ jobs:
     name: 'Tests: @librechat/api (shard ${{ matrix.shard }}/4)'
     needs: [build, codegraph_select]
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.codegraph_select.outputs.pkgapi_run != 'false' }}
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     # Suite typically completes in ~5 min on a warm runner, but tail-latency
     # cancellations have started showing up: tests are actively passing right
     # up to the timeout, then the job is killed mid-suite. Sharding splits the

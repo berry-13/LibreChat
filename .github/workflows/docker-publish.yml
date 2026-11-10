@@ -54,7 +54,7 @@ permissions:
 jobs:
   build:
     name: Build ${{ matrix.image.image_name }} (${{ matrix.arch }})
-    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'avrea-ubuntu-24.04-arm-4-vcpu' || 'avrea-ubuntu-latest-4-vcpu' }}
     timeout-minutes: ${{ inputs.build_timeout_minutes }}
     strategy:
       fail-fast: false
@@ -103,8 +103,8 @@ jobs:
           file: ${{ matrix.image.file }}
           platforms: linux/${{ matrix.arch }}
           target: ${{ matrix.image.target }}
-          cache-from: type=gha,scope=bench-${{ matrix.image.image_name }}-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=bench-${{ matrix.image.image_name }}-${{ matrix.arch }}
+          cache-from: type=gha,url_v2=https://cache.avrea.com/,scope=bench-${{ matrix.image.image_name }}-${{ matrix.arch }}
+          cache-to: type=gha,url_v2=https://cache.avrea.com/,mode=max,scope=bench-${{ matrix.image.image_name }}-${{ matrix.arch }}
           outputs: type=oci,dest=${{ runner.temp }}/image.tar
           build-args: |
             BUILD_COMMIT=${{ env.BUILD_COMMIT }}

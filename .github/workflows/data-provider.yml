@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   pack:
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     outputs:
       skip: ${{ steps.check.outputs.skip }}
     steps:
@@ -58,7 +58,7 @@ jobs:
   publish-npm:
     needs: pack
     if: github.ref == 'refs/heads/main' && needs.pack.outputs.skip != 'true'
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     environment: publish  # Must match npm trusted publisher config
     permissions:
       contents: read

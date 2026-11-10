@@ -39,7 +39,7 @@ jobs:
   # Kill switch: repo variable CODEGRAPH_GATING=off.
   codegraph_select:
     name: Codegraph select
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 5
     if: >-
       github.event_name == 'pull_request' &&
@@ -119,7 +119,7 @@ jobs:
     name: Build Docker client package target
     needs: [codegraph_select]
     if: ${{ !cancelled() && needs.codegraph_select.outputs.client_run != 'false' }}
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
@@ -142,7 +142,7 @@ jobs:
   # gated to changes of the Dockerfile or the build-context definition.
   node-image-smoke:
     name: Node image smoke (plain Dockerfile builds)
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
@@ -171,14 +171,14 @@ jobs:
           platforms: linux/amd64
           push: false
           target: node
-          cache-from: type=gha,scope=docker-smoke-node
-          cache-to: type=gha,mode=max,scope=docker-smoke-node
+          cache-from: type=gha,url_v2=https://cache.avrea.com/,scope=docker-smoke-node
+          cache-to: type=gha,url_v2=https://cache.avrea.com/,mode=max,scope=docker-smoke-node
 
   api-runtime-smoke:
     name: API runtime smoke (production image boots)
     needs: [codegraph_select]
     if: ${{ !cancelled() && needs.codegraph_select.outputs.api_run != 'false' }}
-    runs-on: ubuntu-latest
+    runs-on: avrea-ubuntu-latest-4-vcpu
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -198,8 +198,8 @@ jobs:
           push: false
           load: true
           tags: librechat-api-smoke:ci
-          cache-from: type=gha,scope=docker-smoke-api
-          cache-to: type=gha,mode=max,scope=docker-smoke-api
+          cache-from: type=gha,url_v2=https://cache.avrea.com/,scope=docker-smoke-api
+          cache-to: type=gha,url_v2=https://cache.avrea.com/,mode=max,scope=docker-smoke-api
 
       # Loads the entire externalized require graph of the built @librechat/api
       # bundle inside the pruned production image. A missing or ESM-incompatible
