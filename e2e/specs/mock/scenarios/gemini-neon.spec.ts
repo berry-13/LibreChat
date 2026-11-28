@@ -9,10 +9,11 @@ import {
 } from '../helpers';
 import { cleanupAgent, uniqueAgentName } from '../agents.helpers';
 
-for (const mode of ['chat', 'agent'] as const) {
-  test(`Neon ${mode} retains its foreground budget on reload @scenario:neon-${mode}-reload`, async ({
-    page,
-  }) => {
+for (const [mode, tag] of [
+  ['chat', '@scenario:neon-chat-reload'],
+  ['agent', '@scenario:neon-agent-reload'],
+] as const) {
+  test(`Neon ${mode} retains its foreground budget on reload ${tag}`, async ({ page }) => {
     const model = 'gemini-4-neon';
     await page.goto(NEW_CHAT_PATH);
     const agent =
