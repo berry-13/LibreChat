@@ -1,4 +1,4 @@
-import { EModelEndpoint } from 'librechat-data-provider';
+import { AuthKeys, ErrorTypes, EModelEndpoint } from 'librechat-data-provider';
 import type { AppConfig } from '@librechat/data-schemas';
 import type { Response } from 'express';
 import type { TokenomicsDeps } from './pricing';
@@ -279,6 +279,77 @@ describe('scoped token config controller', () => {
       loadAsyncEndpoints,
     };
   }
+
+  it.each([
+    [
+      { [AuthKeys.GOOGLE_SERVICE_KEY]: JSON.stringify({ project_id: 'user-project' }) },
+      3.3,
+      16.5,
+      0.165,
+    ],
+    [{ [AuthKeys.GOOGLE_API_KEY]: 'user-key' }, 3, 15, 0.15],
+    [
+      {
+        [AuthKeys.GOOGLE_API_KEY]: 'user-key',
+        [AuthKeys.GOOGLE_SERVICE_KEY]: { project_id: 'project' },
+      },
+      3,
+      15,
+      0.15,
+    ],
+  ] as const)(
+    'prices the Google catalog for the stored credential mode',
+    async (credentials, prompt, completion, cacheRead) => {
+      const getUserKey = jest.fn().mockResolvedValue(JSON.stringify(credentials));
+      const test = setup(
+        'google',
+        getGoogleBillingConfig({ GOOGLE_KEY: 'user_provided', GOOGLE_LOC: 'eu' }, getUserKey),
+      );
+      test.loadAsyncEndpoints.mockResolvedValue({ google: { userProvide: true } });
+      await test.controller(test.req, test.http);
+      expect(test.res.json).toHaveBeenCalledWith({
+        google: expect.objectContaining({
+          'gemini-4-neon': expect.objectContaining({ prompt, completion, cacheRead }),
+        }),
+      });
+      expect(getUserKey).toHaveBeenCalledWith({
+        userId: 'user-1',
+        name: 'google',
+        activeOnly: true,
+      });
+    },
+  );
+
+  it('keeps Google estimates available before a user supplies a key', async () => {
+    const getUserKey = jest
+      .fn()
+      .mockRejectedValue(new Error(JSON.stringify({ type: ErrorTypes.NO_USER_KEY })));
+    const test = setup(
+      'google',
+      getGoogleBillingConfig({ GOOGLE_KEY: 'user_provided', GOOGLE_LOC: 'us' }, getUserKey),
+    );
+    test.loadAsyncEndpoints.mockResolvedValue({ google: { userProvide: true } });
+    await test.controller(test.req, test.http);
+    expect(test.res.json).toHaveBeenCalledWith({
+      google: expect.objectContaining({ 'gemini-4-neon': expect.objectContaining({ prompt: 3 }) }),
+    });
+  });
+
+  it('skips stored Google credentials for an explicit Vertex estimate', async () => {
+    const getUserKey = jest.fn();
+    const test = setup(
+      'vertexai',
+      getGoogleBillingConfig({ GOOGLE_KEY: 'user_provided', GOOGLE_LOC: 'us' }, getUserKey),
+    );
+    test.loadAsyncEndpoints.mockResolvedValue({ google: { userProvide: true } });
+    await test.controller(test.req, test.http);
+    expect(test.res.json).toHaveBeenCalledWith({
+      vertexai: expect.objectContaining({
+        'gemini-4-neon': expect.objectContaining({ prompt: 3.3 }),
+      }),
+    });
+    expect(getUserKey).not.toHaveBeenCalled();
+  });
 
   it('discovers native Vertex models through Google while preserving its pricing identity', async () => {
     const test = setup(

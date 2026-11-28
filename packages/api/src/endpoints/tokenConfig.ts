@@ -1,5 +1,12 @@
 import { logger } from '@librechat/data-schemas';
-import { Providers, EModelEndpoint, normalizeEndpointName } from 'librechat-data-provider';
+import {
+  Providers,
+  isGeminiNeon,
+  isGeminiHydrogen,
+  ErrorTypes,
+  EModelEndpoint,
+  normalizeEndpointName,
+} from 'librechat-data-provider';
 import type { TModelsConfig, TTokenConfigMap, TEndpoint } from 'librechat-data-provider';
 import type { AppConfig } from '@librechat/data-schemas';
 import type { Response } from 'express';
@@ -10,6 +17,7 @@ import { getTokenConfigKey } from '~/endpoints/custom/initialize';
 import { getGoogleTokenConfig } from '~/endpoints/google/pricing';
 import { buildTokenConfigMap } from '~/endpoints/pricing';
 import { getSafeErrorMetadata } from '~/utils/errors';
+import { resolveGoogleAuth } from './google/auth';
 import { tokenConfigCache } from '~/cache';
 
 export interface ResolveTokenConfigParams {
@@ -103,16 +111,45 @@ export async function resolveTokenConfigMap(
 export type GoogleBillingConfig = Pick<
   ResolveTokenConfigParams,
   'googleUsesVertex' | 'googleLocation'
->;
+> & { userUsesVertex?: (userId: string) => Promise<boolean> };
 
 /** Resolve existing deployment settings at the application wiring boundary. */
-export function getGoogleBillingConfig(environment: {
-  GOOGLE_KEY?: string;
-  GOOGLE_LOC?: string;
-}): GoogleBillingConfig {
+export function getGoogleBillingConfig(
+  environment: {
+    GOOGLE_KEY?: string;
+    GOOGLE_LOC?: string;
+  },
+  getUserKey?: (params: { userId: string; name: string; activeOnly: boolean }) => Promise<string>,
+): GoogleBillingConfig {
   return {
     googleUsesVertex: !environment.GOOGLE_KEY?.trim(),
     googleLocation: environment.GOOGLE_LOC,
+    ...(environment.GOOGLE_KEY === 'user_provided' &&
+      getUserKey && {
+        async userUsesVertex(userId: string) {
+          let credentials: string;
+          try {
+            credentials = await getUserKey({
+              userId,
+              name: EModelEndpoint.google,
+              activeOnly: true,
+            });
+          } catch (error) {
+            if (
+              error instanceof Error &&
+              error.message === JSON.stringify({ type: ErrorTypes.NO_USER_KEY })
+            )
+              return false;
+            throw error;
+          }
+          try {
+            return Boolean(resolveGoogleAuth(credentials).projectId);
+          } catch {
+            // An unusable saved credential cannot select Vertex for a Google request.
+            return false;
+          }
+        },
+      }),
   };
 }
 
@@ -145,13 +182,25 @@ export function createTokenConfigController(
       if (!result.ok) {
         return res.status(result.status).json({ error: result.error });
       }
+      const billing = deps.googleBillingConfig;
+      const needsUserMode =
+        (endpoint == null || endpoint === EModelEndpoint.google) &&
+        req.config?.interfaceConfig?.contextCost === true &&
+        !!billing?.userUsesVertex &&
+        !!billing.googleLocation &&
+        billing.googleLocation !== 'global' &&
+        result.modelsConfig.google?.some((model) => isGeminiNeon(model) || isGeminiHydrogen(model));
       const map = await resolveTokenConfigMap(
         {
           appConfig: req.config,
           modelsConfig: result.modelsConfig,
           userId: req.user.id,
           tenantId: req.user.tenantId,
-          ...deps.googleBillingConfig,
+          googleLocation: billing?.googleLocation,
+          googleUsesVertex:
+            needsUserMode && billing?.userUsesVertex
+              ? await billing.userUsesVertex(req.user.id)
+              : billing?.googleUsesVertex,
         },
         deps,
       );

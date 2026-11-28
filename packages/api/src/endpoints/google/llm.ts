@@ -2,7 +2,6 @@ import { Providers } from '@librechat/agents';
 import { logger } from '@librechat/data-schemas';
 import {
   googleSettings,
-  AuthKeys,
   removeNullishValues,
   getGeminiForegroundLimits,
   supportsGeminiXHighThinking,
@@ -11,6 +10,7 @@ import type { GoogleClientOptions, VertexAIClientOptions } from '@librechat/agen
 import type { GoogleAIToolType } from '@librechat/agents/langchain/google-common';
 import type * as t from '~/types';
 import { mergeGoogleHeaders } from '~/utils/headers';
+import { resolveGoogleAuth } from './auth';
 import { isEnabled } from '~/utils';
 
 type GoogleThinkingLevel =
@@ -559,33 +559,11 @@ export function getGoogleConfig(
    */
   reasoningEffort?: string;
 } {
-  let creds: t.GoogleCredentials = {};
-  if (acceptRawApiKey && typeof credentials === 'string') {
-    creds[AuthKeys.GOOGLE_API_KEY] = credentials;
-  } else if (typeof credentials === 'string') {
-    try {
-      creds = JSON.parse(credentials);
-    } catch (err: unknown) {
-      throw new Error(
-        `Error parsing string credentials: ${err instanceof Error ? err.message : 'Unknown error'}`,
-      );
-    }
-  } else if (credentials && typeof credentials === 'object') {
-    creds = credentials;
-  }
-
-  const serviceKeyRaw = creds[AuthKeys.GOOGLE_SERVICE_KEY] ?? {};
-  const serviceKey =
-    typeof serviceKeyRaw === 'string' ? JSON.parse(serviceKeyRaw) : (serviceKeyRaw ?? {});
-
-  const apiKey = creds[AuthKeys.GOOGLE_API_KEY] ?? null;
-  let project_id = null;
-  if (options.forceVertex === true) {
-    project_id = options.projectId ?? serviceKey?.project_id ?? null;
-  } else if (!apiKey) {
-    project_id = serviceKey?.project_id ?? null;
-  }
-
+  const { apiKey, serviceKey, projectId } = resolveGoogleAuth(
+    credentials,
+    options,
+    acceptRawApiKey,
+  );
   const reverseProxyUrl = options.reverseProxyUrl;
   const authHeader = options.authHeader;
 
@@ -627,7 +605,7 @@ export function getGoogleConfig(
 
   let provider;
 
-  if (options.forceVertex === true || project_id) {
+  if (options.forceVertex === true || projectId) {
     provider = Providers.VERTEXAI;
   } else {
     provider = Providers.GOOGLE;
@@ -638,7 +616,7 @@ export function getGoogleConfig(
     (llmConfig as VertexAIClientOptions).authOptions = removeNullishValues(
       {
         ...(hasServiceKeyCredentials(serviceKey) && { credentials: { ...serviceKey } }),
-        projectId: project_id,
+        projectId,
       },
       true,
     );
