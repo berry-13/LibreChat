@@ -217,14 +217,14 @@ describe('theme cache storage', () => {
  *   beside each known source and beside all of them, so a source that acts only beside another
  *   joins too; each is generated in every scope with all of its sources named and with every pair
  *   of them, each with and without the role named as well, every named role taking its own value,
- *   so fallback precedence and opting out are covered without listing the chains by hand;
+ *   with each accepted special appearance sample also named beside its peers;
  * - every brand set theme-wide, in light and in dark with conflicting values;
  * - every pair of candidates for roles validated together, the pairs found by validating every
  *   pair of accepted candidates, theme-wide, in light only and in dark only;
  * - definitions with one or both mode blocks absent.
  * A new role, or a new fallback, joins by construction.
  */
-const PIN = { fingerprint: '1.6.yvfxk0', digest: 'ixoe22' };
+const PIN = { fingerprint: '1.6.yvfxk0', digest: 'oszxmy' };
 
 const digestOf = (text: string): string => {
   let hash = 5381;
@@ -578,32 +578,43 @@ function derivedFixtures(): Fixture[] {
   const roles = derivedRoles();
   return (['colors', 'appearance'] as const).flatMap((kind) =>
     [...roles[kind]].flatMap(([target, sources]) => {
-      const named = (tokens: string[], scope: Scope) =>
-        define(target, (mode) => OVERRIDES[kind](tokens, mode), scope);
-      const pairs = sources.flatMap((first, index) =>
-        sources.slice(index + 1).flatMap((second) =>
-          SCOPES.flatMap((scope) => [
-            {
-              key: `derived:${kind}:${target}:pair:${first}+${second}:${scope}`,
-              theme: named([first, second], scope),
-            },
-            {
-              key: `derived:${kind}:${target}:pair-named:${first}+${second}:${scope}`,
-              theme: named([first, second, target], scope),
-            },
-          ]),
+      const contexts = [
+        { key: 'sources', tokens: sources },
+        ...sources.flatMap((first, index) =>
+          sources.slice(index + 1).map((second) => ({
+            key: `pair:${first}+${second}`,
+            tokens: [first, second],
+          })),
         ),
-      );
-      return [
-        ...SCOPES.flatMap((scope) => [
-          { key: `derived:${kind}:${target}:sources:${scope}`, theme: named(sources, scope) },
-          {
-            key: `derived:${kind}:${target}:named:${scope}`,
-            theme: named([...sources, target], scope),
-          },
-        ]),
-        ...pairs,
       ];
+      return contexts.flatMap(({ key, tokens }) =>
+        [false, true].flatMap((explicit) => {
+          const named = explicit ? [...tokens, target] : tokens;
+          const prefix = `derived:${kind}:${target}:${key}:${explicit ? 'named' : 'inherited'}`;
+          const fixtures = SCOPES.map((scope) => ({
+            key: `${prefix}:${scope}`,
+            theme: define(target, (mode) => OVERRIDES[kind](named, mode), scope),
+          }));
+          if (kind === 'appearance') {
+            const defaults = appearanceOverrides(named);
+            for (const source of tokens) {
+              for (const value of SAMPLES[source]) {
+                const appearance = { ...defaults, [source]: value };
+                if (value === defaults[source] || !isValidAppearance(appearance)) {
+                  continue;
+                }
+                for (const scope of SCOPES) {
+                  fixtures.push({
+                    key: `${prefix}:${source}:${value}:${scope}`,
+                    theme: define(target, () => ({ appearance }), scope),
+                  });
+                }
+              }
+            }
+          }
+          return fixtures;
+        }),
+      );
     }),
   );
 }
@@ -694,6 +705,27 @@ describe('resolver output pin', () => {
     expect(derivedRoles().colors.get('rgb-series-8')).toEqual(
       expect.arrayContaining(['rgb-series-1', 'rgb-text-secondary']),
     );
+  });
+
+  // @scenario:derived-samples
+  it('pins each accepted corner sample beside the other sign-in action corner source', () => {
+    const fixtures = derivedFixtures();
+    for (const scope of SCOPES) {
+      for (const value of SAMPLES.radiusLg) {
+        const matching = fixtures.filter(
+          ({ theme }) =>
+            theme.name === 'authActionRadius' &&
+            MODES.every((mode) => {
+              if (scope !== 'both' && scope !== mode) {
+                return theme.modes[mode] === undefined;
+              }
+              const appearance = theme.modes[mode]?.appearance;
+              return appearance?.radiusLg === value && appearance.authControlRadius !== undefined;
+            }),
+        );
+        expect(matching.length).toBeGreaterThan(0);
+      }
+    }
   });
 
   it('generates derived fixtures the validator accepts, joint rules included', () => {
