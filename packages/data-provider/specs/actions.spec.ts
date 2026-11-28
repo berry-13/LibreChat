@@ -1582,6 +1582,367 @@ describe('createURL', () => {
   });
 });
 
+describe('openapiToFunction: path-item parameters and allOf request bodies', () => {
+  const baseSpec = {
+    openapi: '3.0.0' as const,
+    info: { title: 'Test', version: '1.0.0' },
+    servers: [{ url: 'https://api.example.com' }],
+  };
+
+  describe('path-item level parameters', () => {
+    it('keeps operation and body fields when an inherited name is ambiguous', async () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const post = jest.fn();
+      mockedAxios.create.mockReturnValue({ post } as unknown as ReturnType<typeof axios.create>);
+      const { functionSignatures, requestBuilders } = openapiToFunction({
+        ...baseSpec,
+        paths: {
+          '/items/{id}': {
+            parameters: [
+              { name: 'id', in: 'query', required: true, schema: { type: 'string' } },
+              { name: 'note', in: 'header', required: true, schema: { type: 'number' } },
+            ],
+            post: {
+              operationId: 'update',
+              parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'number' } }],
+              requestBody: {
+                content: {
+                  'application/json': {
+                    schema: { type: 'object', properties: { note: { type: 'string' } } },
+                  },
+                },
+              },
+              responses: {},
+            },
+          },
+        },
+      });
+      expect(functionSignatures[0].parameters.required).toEqual(['id']);
+      expect(warn).toHaveBeenCalledTimes(2);
+      await requestBuilders.update.setParams({ id: 3, note: 'hello' }).execute();
+      expect(post).toHaveBeenCalledWith(
+        'https://api.example.com/items/3',
+        { note: 'hello' },
+        { headers: { 'Content-Type': 'application/json' }, params: {} },
+      );
+    });
+
+    it('merges shared path-item parameters into all operations', () => {
+      const spec: OpenAPIV3.Document = {
+        ...baseSpec,
+        paths: {
+          '/items/{id}': {
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+            get: {
+              operationId: 'getItem',
+              responses: { '200': { description: 'ok' } },
+            },
+            delete: {
+              operationId: 'deleteItem',
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      };
+
+      const { functionSignatures } = openapiToFunction(spec);
+
+      const getItem = functionSignatures.find((s) => s.name === 'getItem');
+      const deleteItem = functionSignatures.find((s) => s.name === 'deleteItem');
+
+      expect(getItem).toBeDefined();
+      expect(deleteItem).toBeDefined();
+      expect(getItem?.parameters.properties).toHaveProperty('id');
+      expect(getItem?.parameters.required).toContain('id');
+      expect(deleteItem?.parameters.properties).toHaveProperty('id');
+      expect(deleteItem?.parameters.required).toContain('id');
+    });
+
+    it('does not create a ghost tool for the path-item parameters key', () => {
+      const spec: OpenAPIV3.Document = {
+        ...baseSpec,
+        paths: {
+          '/items/{id}': {
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+            get: {
+              operationId: 'getItem',
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      };
+
+      const { functionSignatures } = openapiToFunction(spec);
+
+      const ghostTool = functionSignatures.find((s) => s.name.startsWith('parameters'));
+      expect(ghostTool).toBeUndefined();
+      expect(functionSignatures).toHaveLength(1);
+    });
+
+    it('operation-level parameter wins over path-item parameter on (name, in) collision', () => {
+      const spec: OpenAPIV3.Document = {
+        ...baseSpec,
+        paths: {
+          '/items/{id}': {
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+            get: {
+              operationId: 'getItem',
+              // Operation-level overrides with integer type
+              parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+              responses: { '200': { description: 'ok' } },
+            },
+            delete: {
+              operationId: 'deleteItem',
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      };
+
+      const { functionSignatures } = openapiToFunction(spec);
+
+      const getItem = functionSignatures.find((s) => s.name === 'getItem');
+      const deleteItem = functionSignatures.find((s) => s.name === 'deleteItem');
+
+      // get uses operation-level integer
+      const getIdSchema = getItem?.parameters.properties['id'] as OpenAPIV3.SchemaObject;
+      expect(getIdSchema?.type).toBe('integer');
+
+      // delete still gets the path-item string
+      const deleteIdSchema = deleteItem?.parameters.properties['id'] as OpenAPIV3.SchemaObject;
+      expect(deleteIdSchema?.type).toBe('string');
+    });
+
+    it('ignores non-method keys on path items (summary, description, servers)', () => {
+      const spec: OpenAPIV3.Document = {
+        ...baseSpec,
+        paths: {
+          '/items': {
+            summary: 'Item operations',
+            description: 'CRUD for items',
+            servers: [{ url: 'https://other.example.com' }],
+            get: {
+              operationId: 'listItems',
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      };
+
+      const { functionSignatures } = openapiToFunction(spec);
+
+      expect(functionSignatures).toHaveLength(1);
+      expect(functionSignatures[0].name).toBe('listItems');
+    });
+  });
+
+  describe('allOf in request bodies', () => {
+    it('flattens allOf in a request body into a single set of properties', () => {
+      const spec: OpenAPIV3.Document = {
+        ...baseSpec,
+        paths: {
+          '/scrape': {
+            post: {
+              operationId: 'scrape',
+              requestBody: {
+                content: {
+                  'application/json': {
+                    schema: {
+                      allOf: [
+                        {
+                          type: 'object',
+                          properties: { url: { type: 'string' } },
+                          required: ['url'],
+                        },
+                        {
+                          type: 'object',
+                          properties: {
+                            url: { minLength: 3 },
+                            formats: { type: 'array', items: { type: 'string' } },
+                            onlyMainContent: { type: 'boolean' },
+                          },
+                        },
+                      ],
+                    } as OpenAPIV3.SchemaObject,
+                  },
+                },
+              },
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      };
+
+      const { functionSignatures, zodSchemas } = openapiToFunction(spec, true);
+      const scrape = functionSignatures.find((s) => s.name === 'scrape');
+
+      expect(scrape?.parameters.properties.url).toEqual({
+        allOf: [{ type: 'string' }, { minLength: 3 }],
+      });
+      expect(zodSchemas?.scrape.safeParse({ url: 'ok' }).success).toBe(false);
+      expect(zodSchemas?.scrape.safeParse({ url: 123 }).success).toBe(false);
+      expect(zodSchemas?.scrape.safeParse({ url: 'valid' }).success).toBe(true);
+      expect(scrape?.parameters.properties).toHaveProperty('url');
+      expect(scrape?.parameters.properties).toHaveProperty('formats');
+      expect(scrape?.parameters.properties).toHaveProperty('onlyMainContent');
+      expect(scrape?.parameters.required).toContain('url');
+    });
+
+    it('resolves $ref inside allOf members', () => {
+      const spec: OpenAPIV3.Document = {
+        ...baseSpec,
+        paths: {
+          '/scrape': {
+            post: {
+              operationId: 'scrape',
+              requestBody: {
+                content: {
+                  'application/json': {
+                    schema: {
+                      allOf: [
+                        {
+                          type: 'object',
+                          properties: { url: { type: 'string' } },
+                          required: ['url'],
+                        },
+                        { $ref: '#/components/schemas/ScrapeOptions' },
+                        { $ref: '#/components/schemas/ScrapeOptions' },
+                      ],
+                    } as OpenAPIV3.SchemaObject,
+                  },
+                },
+              },
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            Named: { allOf: [{ type: 'object', properties: { name: { type: 'string' } } }] },
+            ScrapeOptions: {
+              type: 'object',
+              properties: {
+                formats: { type: 'array', items: { type: 'string' } },
+                onlyMainContent: { type: 'boolean' },
+                nested: {
+                  allOf: [
+                    { $ref: '#/components/schemas/Named' },
+                    { required: ['name'] },
+                    {
+                      type: 'object',
+                      properties: { optional: { type: 'number' } },
+                      additionalProperties: { type: 'string' },
+                    },
+                    { type: 'object', properties: { extra: { type: 'string' } } },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      };
+
+      const { functionSignatures, zodSchemas } = openapiToFunction(spec, true);
+      const input = { url: 'ok', nested: { name: 'example', extra: 'value', custom: 'kept' } };
+      expect(zodSchemas?.scrape.parse(input)).toEqual(input);
+      expect(
+        zodSchemas?.scrape.safeParse({ ...input, nested: { name: 'example', custom: 3 } }).success,
+      ).toBe(false);
+      expect(zodSchemas?.scrape.safeParse({ ...input, nested: {} }).success).toBe(false);
+      expect(zodSchemas?.scrape.safeParse({ ...input, nested: { name: 123 } }).success).toBe(false);
+      const scrape = functionSignatures.find((s) => s.name === 'scrape');
+
+      expect(scrape?.parameters.properties).toHaveProperty('url');
+      expect(scrape?.parameters.properties).toHaveProperty('formats');
+      expect(scrape?.parameters.properties.onlyMainContent).toEqual({ type: 'boolean' });
+      expect(scrape?.parameters.required).toContain('url');
+    });
+
+    it('resolves $ref to a component that itself uses allOf', () => {
+      const spec: OpenAPIV3.Document = {
+        ...baseSpec,
+        paths: {
+          '/scrape': {
+            post: {
+              operationId: 'scrape',
+              requestBody: {
+                content: {
+                  'application/json': {
+                    schema: {
+                      $ref: '#/components/schemas/ScrapeRequest',
+                    } as OpenAPIV3.ReferenceObject,
+                  },
+                },
+              },
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            ScrapeRequest: {
+              allOf: [
+                { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] },
+                { $ref: '#/components/schemas/ScrapeOptions' },
+              ],
+            } as OpenAPIV3.SchemaObject,
+            ScrapeOptions: {
+              type: 'object',
+              properties: {
+                formats: { type: 'array', items: { type: 'string' } },
+              },
+            },
+          },
+        },
+      };
+
+      const { functionSignatures } = openapiToFunction(spec);
+      const scrape = functionSignatures.find((s) => s.name === 'scrape');
+
+      expect(scrape?.parameters.properties).toHaveProperty('url');
+      expect(scrape?.parameters.properties).toHaveProperty('formats');
+      expect(scrape?.parameters.required).toContain('url');
+    });
+
+    it('merges properties defined alongside allOf on the same schema object', () => {
+      const spec: OpenAPIV3.Document = {
+        ...baseSpec,
+        paths: {
+          '/create': {
+            post: {
+              operationId: 'createThing',
+              requestBody: {
+                content: {
+                  'application/json': {
+                    schema: {
+                      allOf: [
+                        {
+                          type: 'object',
+                          properties: { name: { type: 'string' } },
+                          required: ['name'],
+                        },
+                      ],
+                      properties: { extra: { type: 'number' } },
+                    } as OpenAPIV3.SchemaObject,
+                  },
+                },
+              },
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      };
+
+      const { functionSignatures } = openapiToFunction(spec);
+      const fn = functionSignatures.find((s) => s.name === 'createThing');
+
+      expect(fn?.parameters.properties).toHaveProperty('name');
+      expect(fn?.parameters.properties).toHaveProperty('extra');
+      expect(fn?.parameters.required).toContain('name');
+    });
+  });
+});
+
 describe('SSRF Protection', () => {
   describe('extractDomainFromUrl', () => {
     it('extracts domain from valid HTTPS URL', () => {

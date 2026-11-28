@@ -51,7 +51,12 @@ export function createURL(domain: string, path: string) {
   return new URL(fullURL).toString();
 }
 
-const schemaTypeHandlers: Record<string, (schema: OpenAPISchema) => z.ZodTypeAny> = {
+type ConvertSchema = (schema: OpenAPISchema) => z.ZodTypeAny | undefined;
+
+const schemaTypeHandlers: Record<
+  string,
+  (schema: OpenAPISchema, convert: ConvertSchema) => z.ZodTypeAny
+> = {
   string: (schema) => {
     if (schema.enum) {
       return z.enum(schema.enum as [string, ...string[]]);
@@ -76,11 +81,11 @@ const schemaTypeHandlers: Record<string, (schema: OpenAPISchema) => z.ZodTypeAny
     }
     return numberSchema;
   },
-  integer: (schema) => (schemaTypeHandlers.number(schema) as z.ZodNumber).int(),
+  integer: (schema, convert) => (schemaTypeHandlers.number(schema, convert) as z.ZodNumber).int(),
   boolean: () => z.boolean(),
-  array: (schema) => {
+  array: (schema, convert) => {
     if (schema.items) {
-      const zodSchema = openAPISchemaToZod(schema.items as OpenAPISchema);
+      const zodSchema = convert(schema.items as OpenAPISchema);
       if (zodSchema) {
         return z.array(zodSchema);
       }
@@ -89,11 +94,11 @@ const schemaTypeHandlers: Record<string, (schema: OpenAPISchema) => z.ZodTypeAny
     }
     return z.array(z.unknown());
   },
-  object: (schema) => {
+  object: (schema, convert) => {
     const shape: { [key: string]: z.ZodTypeAny } = {};
     if (schema.properties) {
       Object.entries(schema.properties).forEach(([key, value]) => {
-        const zodSchema = openAPISchemaToZod(value as OpenAPISchema);
+        const zodSchema = convert(value as OpenAPISchema);
         shape[key] = zodSchema || z.unknown();
         if (schema.required && schema.required.includes(key)) {
           shape[key] = shape[key].describe(value.description || '');
@@ -106,13 +111,101 @@ const schemaTypeHandlers: Record<string, (schema: OpenAPISchema) => z.ZodTypeAny
   },
 };
 
-function openAPISchemaToZod(schema: OpenAPISchema): z.ZodTypeAny | undefined {
+function openAPISchemaToZod(
+  schema: OpenAPISchema,
+  components?: OpenAPIV3.ComponentsObject,
+  budget = { remaining: SCHEMA_WORK_LIMIT },
+  depth = 0,
+  ancestors = new Set<OpenAPIV3.SchemaObject>(),
+): z.ZodTypeAny | undefined {
+  countSchemaWork(budget, depth);
+  if (schema.allOf?.length) {
+    const members = conjuncts(schema, components, budget, depth);
+    const type = members.find((member) => member.type)?.type;
+    const objectConstraints = members.some(
+      (member) => member.properties || member.required || member.additionalProperties !== undefined,
+    );
+    if (
+      (type === 'object' || (!type && objectConstraints)) &&
+      members.every((member) => !member.type || member.type === 'object')
+    ) {
+      const object = mergeFields(members, components, budget);
+      const fields = openAPISchemaToZod(
+        { ...object, type: 'object' } as OpenAPISchema,
+        components,
+        budget,
+        depth + 1,
+        ancestors,
+      );
+      let validator: z.ZodTypeAny =
+        fields instanceof z.ZodObject ? fields.passthrough() : z.object({}).passthrough();
+      let intersections = 0;
+      for (const member of members) {
+        const additional = member.additionalProperties;
+        if (additional === undefined || additional === true) {
+          continue;
+        }
+        if (++intersections > SCHEMA_DEPTH_LIMIT) {
+          throw new Error('OpenAPI intersection exceeds the conversion limit');
+        }
+        // A dictionary constraint exempts only keys declared by that same conjunct.
+        const known = Object.fromEntries(
+          Object.keys(member.properties ?? {}).map((key) => [key, z.unknown().optional()]),
+        );
+        const dictionary = z.object(known);
+        if (additional === false) {
+          validator = validator.and(dictionary.strict());
+        } else {
+          const entry = openAPISchemaToZod(
+            resolveRef(additional, components) as OpenAPISchema,
+            components,
+            budget,
+            depth + 1,
+            ancestors,
+          );
+          validator = validator.and(dictionary.catchall(entry ?? z.unknown()));
+        }
+      }
+      if (type) {
+        return validator;
+      }
+      // Without an explicit type, object keywords only constrain object instances.
+      return z.union([
+        validator,
+        z.string(),
+        z.number(),
+        z.boolean(),
+        z.null(),
+        z.array(z.unknown()),
+      ]);
+    }
+    if (members.length > SCHEMA_DEPTH_LIMIT) {
+      throw new Error('OpenAPI intersection exceeds the conversion limit');
+    }
+    return members.reduce<z.ZodTypeAny>((result, member) => {
+      if (ancestors.has(member)) {
+        return result;
+      }
+      ancestors.add(member);
+      const validator = openAPISchemaToZod(
+        { type, ...member, allOf: undefined } as OpenAPISchema,
+        components,
+        budget,
+        depth + 1,
+        ancestors,
+      );
+      ancestors.delete(member);
+      return validator ? result.and(validator) : result;
+    }, z.unknown());
+  }
   if (schema.type === 'object' && Object.keys(schema.properties || {}).length === 0) {
     return undefined;
   }
 
   const handler = schemaTypeHandlers[schema.type as string] || (() => z.unknown());
-  return handler(schema);
+  return handler(schema, (child) =>
+    openAPISchemaToZod(child, components, budget, depth + 1, ancestors),
+  );
 }
 
 /**
@@ -448,7 +541,11 @@ export function resolveRef<
     | OpenAPIV3.ParameterObject
     | OpenAPIV3.RequestBodyObject,
 >(obj: T, components?: OpenAPIV3.ComponentsObject): Exclude<T, OpenAPIV3.ReferenceObject> {
-  if ('$ref' in obj && components) {
+  let depth = 0;
+  while ('$ref' in obj && components) {
+    if (++depth > SCHEMA_DEPTH_LIMIT) {
+      throw new Error('OpenAPI reference chain exceeds the depth limit');
+    }
     const refPath = obj.$ref.replace(/^#\/components\//, '').split('/');
 
     let resolved: unknown = components as Record<string, unknown>;
@@ -460,7 +557,7 @@ export function resolveRef<
       }
     }
 
-    return resolveRef(resolved as typeof obj, components) as Exclude<T, OpenAPIV3.ReferenceObject>;
+    obj = resolved as T;
   }
 
   return obj as Exclude<T, OpenAPIV3.ReferenceObject>;
@@ -468,6 +565,67 @@ export function resolveRef<
 
 function sanitizeOperationId(input: string) {
   return input.replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
+/** Valid HTTP method names in OpenAPI 3. Used to skip non-operation path-item keys. */
+const HTTP_METHODS = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace']);
+
+// Parser ceilings apply to untrusted schemas in both browser and server imports.
+const SCHEMA_DEPTH_LIMIT = 64;
+const SCHEMA_WORK_LIMIT = 50_000;
+
+function countSchemaWork(budget: { remaining: number }, depth: number) {
+  if (--budget.remaining < 0 || depth > SCHEMA_DEPTH_LIMIT) {
+    throw new Error('OpenAPI schema exceeds the conversion limit');
+  }
+}
+
+/** A component can occur in several branches of the same conjunction. */
+function conjuncts(
+  root: OpenAPIV3.SchemaObject,
+  components: OpenAPIV3.ComponentsObject | undefined,
+  budget: { remaining: number },
+  depth: number,
+) {
+  const seen = new Set<OpenAPIV3.SchemaObject>();
+  function visit(member: OpenAPIV3.SchemaObject, level: number) {
+    countSchemaWork(budget, level);
+    if (seen.has(member)) {
+      return;
+    }
+    seen.add(member);
+    for (const child of member.allOf ?? []) {
+      visit(resolveRef(child, components), level + 1);
+    }
+  }
+  visit(root, depth);
+  return [...seen];
+}
+
+function mergeFields(
+  members: OpenAPIV3.SchemaObject[],
+  components: OpenAPIV3.ComponentsObject | undefined,
+  budget: { remaining: number },
+): OpenAPIV3.SchemaObject {
+  const properties = new Map<string, OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject>();
+  const required = new Set<string>();
+  for (const member of members) {
+    for (const [key, value] of Object.entries(member.properties ?? {})) {
+      countSchemaWork(budget, 0);
+      const previous = properties.get(key);
+      properties.set(
+        key,
+        previous
+          ? { allOf: [resolveRef(previous, components), resolveRef(value, components)] }
+          : value,
+      );
+    }
+    for (const key of member.required ?? []) {
+      countSchemaWork(budget, 0);
+      required.add(key);
+    }
+  }
+  return { properties: Object.fromEntries(properties), required: [...required] };
 }
 
 /**
@@ -481,14 +639,25 @@ export function openapiToFunction(
   requestBuilders: Record<string, ActionRequest>;
   zodSchemas?: Record<string, z.ZodTypeAny>;
 } {
+  const budget = { remaining: SCHEMA_WORK_LIMIT };
   const functionSignatures: FunctionSignature[] = [];
   const requestBuilders: Record<string, ActionRequest> = {};
   const zodSchemas: Record<string, z.ZodTypeAny> = {};
   const baseUrl = openapiSpec.servers?.[0]?.url ?? '';
 
   // Iterate over each path and method in the OpenAPI spec
-  for (const [path, methods] of Object.entries(openapiSpec.paths)) {
-    for (const [method, operation] of Object.entries(methods as OpenAPIV3.PathsObject)) {
+  for (const [path, pathItem] of Object.entries(openapiSpec.paths)) {
+    const methods = pathItem as OpenAPIV3.PathItemObject;
+    // Path-item-level parameters are shared across all operations on this path.
+    // We collect them here and merge them into each operation's own parameters below,
+    // with operation-level parameters taking precedence on (name, in) collisions.
+    const pathItemParameters = methods.parameters ?? [];
+
+    for (const [method, operation] of Object.entries(methods)) {
+      // Skip non-operation keys (parameters, summary, description, servers, $ref, etc.)
+      if (!HTTP_METHODS.has(method)) {
+        continue;
+      }
       const paramLocations: Record<string, 'query' | 'path' | 'header' | 'body'> = {};
       const operationObj = operation as OpenAPIV3.OperationObject & {
         'x-openai-isConsequential'?: boolean;
@@ -508,48 +677,73 @@ export function openapiToFunction(
         required: [],
       };
 
-      if (operationObj.parameters) {
-        for (const param of operationObj.parameters ?? []) {
-          const resolvedParam = resolveRef(
-            param,
-            openapiSpec.components,
-          ) as OpenAPIV3.ParameterObject;
-
-          const paramName = resolvedParam.name;
-          if (!paramName || !resolvedParam.schema) {
-            continue;
-          }
-
-          const paramSchema = resolveRef(
-            resolvedParam.schema,
-            openapiSpec.components,
-          ) as OpenAPIV3.SchemaObject;
-
-          parametersSchema.properties[paramName] = paramSchema;
-          if (resolvedParam.required) {
-            parametersSchema.required.push(paramName);
-          }
-          // Record the parameter location from the OpenAPI "in" field.
-          paramLocations[paramName] =
-            resolvedParam.in === 'query' ||
-            resolvedParam.in === 'path' ||
-            resolvedParam.in === 'header' ||
-            resolvedParam.in === 'body'
-              ? resolvedParam.in
-              : 'query';
-        }
-      }
-
       let contentType = '';
+      let resolvedSchema: OpenAPIV3.SchemaObject = {};
       if (operationObj.requestBody) {
         const requestBody = operationObj.requestBody as RequestBodyObject;
         const content = requestBody.content;
         contentType = Object.keys(content ?? {})[0];
         const schema = content?.[contentType]?.schema;
-        const resolvedSchema = resolveRef(
-          schema as OpenAPIV3.ReferenceObject | OpenAPIV3.SchemaObject,
+        const body = resolveRef(schema ?? {}, openapiSpec.components);
+        resolvedSchema = body.allOf
+          ? mergeFields(
+              conjuncts(body, openapiSpec.components, budget, 0),
+              openapiSpec.components,
+              budget,
+            )
+          : body;
+        contentType = contentType ?? 'application/json';
+      }
+
+      const operationParams = (operationObj.parameters ?? []).map((param) =>
+        resolveRef(param, openapiSpec.components),
+      );
+      const names = new Set(operationParams.map((param) => param.name));
+      const overrides = new Set(operationParams.map((param) => `${param.in}:${param.name}`));
+      const inherited = pathItemParameters
+        .map((param) => resolveRef(param, openapiSpec.components))
+        .filter((param) => {
+          if (overrides.has(`${param.in}:${param.name}`)) {
+            return false;
+          }
+          if (
+            names.has(param.name) ||
+            (resolvedSchema.properties &&
+              Object.prototype.hasOwnProperty.call(resolvedSchema.properties, param.name))
+          ) {
+            console.warn(
+              'Ignoring an inherited OpenAPI parameter that conflicts with an operation or body field.',
+            );
+            return false;
+          }
+          return true;
+        });
+      for (const resolvedParam of [...inherited, ...operationParams]) {
+        const paramName = resolvedParam.name;
+        if (!paramName || !resolvedParam.schema) {
+          continue;
+        }
+
+        const paramSchema = resolveRef(
+          resolvedParam.schema,
           openapiSpec.components,
-        );
+        ) as OpenAPIV3.SchemaObject;
+
+        parametersSchema.properties[paramName] = paramSchema;
+        if (resolvedParam.required) {
+          parametersSchema.required.push(paramName);
+        }
+        // Record the parameter location from the OpenAPI "in" field.
+        paramLocations[paramName] =
+          resolvedParam.in === 'query' ||
+          resolvedParam.in === 'path' ||
+          resolvedParam.in === 'header' ||
+          resolvedParam.in === 'body'
+            ? resolvedParam.in
+            : 'query';
+      }
+
+      if (operationObj.requestBody) {
         parametersSchema.properties = {
           ...parametersSchema.properties,
           ...resolvedSchema.properties,
@@ -563,8 +757,6 @@ export function openapiToFunction(
             paramLocations[key] = 'body';
           }
         }
-
-        contentType = contentType ?? 'application/json';
       }
 
       const functionSignature = new FunctionSignature(
@@ -588,7 +780,7 @@ export function openapiToFunction(
       requestBuilders[operationId] = actionRequest;
 
       if (generateZodSchemas && Object.keys(parametersSchema.properties).length > 0) {
-        const schema = openAPISchemaToZod(parametersSchema);
+        const schema = openAPISchemaToZod(parametersSchema, openapiSpec.components, budget);
         if (schema) {
           zodSchemas[operationId] = schema;
         }
