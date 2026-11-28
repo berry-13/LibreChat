@@ -372,6 +372,7 @@ export interface AgentQueuedTurnMethods {
     deliveryKey: string;
   }) => Promise<boolean>;
   markAgentQueuedTurnMissingDeliveryRetired: (input: { deliveryKey: string }) => Promise<boolean>;
+  deleteQueuedTurnsForUser: (userId: string) => Promise<number>;
   deleteAllAgentQueuedTurnsForUser: (input: { user: Types.ObjectId }) => Promise<number>;
 }
 
@@ -3157,6 +3158,10 @@ export function createAgentQueuedTurnMethods(
     );
   }
 
+  async function deleteQueuedTurnsForUser(userId: string) {
+    return deleteAllAgentQueuedTurnsForUser({ user: new mongoose.Types.ObjectId(userId) });
+  }
+
   async function deleteAllAgentQueuedTurnsForUser(input: {
     user: Types.ObjectId;
   }): Promise<number> {
@@ -3195,6 +3200,7 @@ export function createAgentQueuedTurnMethods(
     markAgentQueuedTurnDeliveryRetired,
     beginAgentQueuedTurnMissingDeliveryRetirement,
     markAgentQueuedTurnMissingDeliveryRetired,
+    deleteQueuedTurnsForUser,
     deleteAllAgentQueuedTurnsForUser,
   };
 }

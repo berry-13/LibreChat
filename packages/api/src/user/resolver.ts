@@ -1,7 +1,6 @@
 import type { TCheckpointerConfig } from 'librechat-data-provider';
-import type { IMongoFile } from '@librechat/data-schemas';
+import type { UserErasureDeps, MCPOAuthErasureHooks, ErasureFile } from './erasure';
 import type { AdminErasureContext, AdminErasureTarget } from '~/admin/users';
-import type { UserErasureDeps, MCPOAuthErasureHooks } from './erasure';
 import type { FileDeletionOutcome } from '../files/deletion';
 import type { MCPServerLookupOptions } from '~/mcp/types';
 
@@ -15,11 +14,7 @@ type ErasureBaseDeps = Omit<
   | 'mcpOAuth'
 >;
 
-/** The stored-file fields deletion reads, without the document members of the persisted model. */
-export type ErasureFile = Pick<
-  IMongoFile,
-  'file_id' | 'filepath' | 'filename' | 'source' | 'type' | 'bytes' | 'embedded' | 'temp_file_id'
->;
+export type { ErasureFile } from './erasure';
 
 export interface ErasureResolverDeps {
   /** Runs an operation in the given tenant's data scope, or system scope when it has none. */

@@ -53,13 +53,16 @@ type ErasureMethods = Pick<
   | 'deleteAllAgentQueuedTurnsForUser'
 >;
 
+type OpenCheckpointDeletion = (
+  userId: string,
+  tenantId: string | undefined,
+  rootConversationId: string | undefined,
+  cfg?: TCheckpointerConfig,
+) => Promise<CheckpointDeletion>;
+
+/** @deprecated Use AccountErasureDeps with eraseAccountData. */
 export interface UserErasureDeps extends ErasureMethods {
-  openCheckpointDeletion: (
-    userId: string,
-    tenantId: string | undefined,
-    rootConversationId: string | undefined,
-    cfg?: TCheckpointerConfig,
-  ) => Promise<CheckpointDeletion>;
+  openCheckpointDeletion: OpenCheckpointDeletion;
   deleteSharedLinks: (userId: string) => Promise<unknown>;
   /** Removes the user's event subscriptions, and with them the grants they hold. */
   deleteSubscriptions: (userId: string) => Promise<unknown>;
@@ -76,6 +79,86 @@ export interface UserErasureDeps extends ErasureMethods {
   /** Runs once the user's sessions are revoked, before the rest of the cascade can fail. */
   onSessionsDeleted?: () => void;
 }
+
+/** The stored-file fields deletion reads, without the document members of the persisted model. */
+export interface ErasureFile {
+  file_id: string;
+  filepath: string;
+  filename: string;
+  source: string;
+  type: string;
+  bytes: number;
+  embedded?: boolean;
+  temp_file_id?: string;
+}
+
+type DeleteUserRecords = (userId: string) => Promise<unknown>;
+type UserFilter = { user: string };
+
+interface ErasureOwnership {
+  deleteQueuedTurnsForUser: DeleteUserRecords;
+  deleteBalancesForUser: DeleteUserRecords;
+  deleteAllAgentApiKeys: DeleteUserRecords;
+  deleteAclEntriesForUser: DeleteUserRecords;
+}
+
+interface ErasureCascade<File extends { file_id: string }> {
+  deleteConvos(
+    userId: string,
+    filter: Record<string, never>,
+    options: { allowEmpty: boolean; beforeDelete(ids: string[]): Promise<void> },
+  ): Promise<unknown>;
+  deleteUserChatProjects: DeleteUserRecords;
+  deleteMessages(filter: UserFilter): Promise<unknown>;
+  getFiles(filter: UserFilter): Promise<File[] | null>;
+  getFiles(
+    filter: UserFilter,
+    sort: undefined,
+    select: { _id: 1 },
+    limit: 1,
+  ): Promise<readonly unknown[] | null>;
+  deleteStoredFiles(files: File[]): Promise<Required<FileDeletionOutcome>>;
+  deleteFiles(
+    ids: string[],
+    user: undefined,
+    options: { files: File[]; userId: string },
+  ): Promise<unknown>;
+  deleteAllUserSessions(filter: { userId: string }): Promise<unknown>;
+  deleteRefreshTokenBridges(filter: { userId: string; tenantId?: string }): Promise<unknown>;
+  deletePasskeysByUser: DeleteUserRecords;
+  deleteUserKey(filter: { userId: string; all: true }): Promise<unknown>;
+  deleteTransactions(filter: UserFilter): Promise<unknown>;
+  deletePresets: DeleteUserRecords;
+  deleteAllUserPluginAuths: DeleteUserRecords;
+  deleteToolCalls: DeleteUserRecords;
+  deleteConversationTags(filter: UserFilter): Promise<unknown>;
+  deleteUserToolFavorites(userId: string, deletionAttemptId?: string): Promise<unknown>;
+  deleteAllUserMemories: DeleteUserRecords;
+  deleteSharedLinks: DeleteUserRecords;
+  deleteUserAgents: DeleteUserRecords;
+  deleteAssistants(filter: UserFilter): Promise<unknown>;
+  deleteUserPrompts: DeleteUserRecords;
+  deleteUserSkills: DeleteUserRecords;
+  deleteActions(filter: UserFilter): Promise<unknown>;
+  deleteTokens(filter: { userId: string }): Promise<unknown>;
+  removeUserFromAllGroups: DeleteUserRecords;
+  deleteSchedulesByUser: DeleteUserRecords;
+  deleteSubscriptions: DeleteUserRecords;
+  onSessionsDeleted?: () => void;
+  openCheckpointDeletion: OpenCheckpointDeletion;
+  findUserErasableMCPServers(userId: string): Promise<{ id: string; serverName: string }[]>;
+  deleteMCPServersWithAcl(ids: string[]): Promise<unknown>;
+  findMCPServerOAuthTokenUserIds(serverName: string, tenantId?: string): Promise<string[]>;
+  findMCPServerViewerEntries(id: string): Promise<OAuthAclSubject[]>;
+  findMCPServerViewerUserIds(entries: OAuthAclSubject[]): Promise<string[]>;
+  invalidateMCPServerTools?: (serverName: string) => Promise<unknown>;
+  disconnectMCPServer?: (serverName: string) => Promise<unknown>;
+  mcpOAuth?: MCPOAuthErasureHooks;
+}
+
+/** Storage-independent dependencies for account erasure. */
+export type AccountErasureDeps<File extends ErasureFile = ErasureFile> = ErasureCascade<File> &
+  ErasureOwnership;
 
 export interface MCPOAuthErasureHooks {
   /** Config of the server before it is removed, so stored tokens can still be revoked. */
@@ -173,8 +256,8 @@ export async function cancelUserDataDeletion(
   else await deps.cancelAgentTriggerUserDeletion(userId, startedAt, deletionAttemptId);
 }
 
-export type MCPServerCleanupDeps = Pick<
-  UserErasureDeps,
+type CleanupDeps = Pick<
+  AccountErasureDeps,
   | 'findUserErasableMCPServers'
   | 'deleteMCPServersWithAcl'
   | 'invalidateMCPServerTools'
@@ -185,6 +268,8 @@ export type MCPServerCleanupDeps = Pick<
   | 'mcpOAuth'
 >;
 
+export type MCPServerCleanupDeps = Pick<UserErasureDeps, keyof CleanupDeps>;
+
 /**
  * Deletes MCP servers solely owned by the user, plus legacy (pre-ACL) servers that only carry
  * the author field, and their ACL entries. Servers with other owners are left intact; the
@@ -193,7 +278,7 @@ export type MCPServerCleanupDeps = Pick<
  */
 export async function deleteUserMCPServers(
   userId: string,
-  deps: MCPServerCleanupDeps,
+  deps: CleanupDeps,
   tenantId?: string,
 ): Promise<void> {
   const servers = await deps.findUserErasableMCPServers(userId);
@@ -322,12 +407,33 @@ async function settleInOrder(steps: Array<Promise<unknown> | undefined>): Promis
  * the final user document delete, and code environment cleanup after that commit. The cascade
  * is idempotent, so a failed attempt can be retried after the caller restores its fences.
  */
+export function eraseAccountData<File extends ErasureFile>(
+  params: UserErasureParams,
+  deps: AccountErasureDeps<File>,
+): Promise<void> {
+  return runErasure(params, deps, deps);
+}
+
+/** @deprecated Use eraseAccountData with plain storage dependencies. */
 export async function eraseUserData(
   params: UserErasureParams,
   deps: UserErasureDeps,
 ): Promise<void> {
+  const id = new mongoose.Types.ObjectId(params.userId);
+  return runErasure<IMongoFile>(params, deps, {
+    deleteQueuedTurnsForUser: () => deps.deleteAllAgentQueuedTurnsForUser({ user: id }),
+    deleteBalancesForUser: () => deps.deleteBalances({ user: id }),
+    deleteAllAgentApiKeys: () => deps.deleteAllAgentApiKeys(id),
+    deleteAclEntriesForUser: () => deps.deleteAclEntries({ principalId: id }),
+  });
+}
+
+async function runErasure<File extends { file_id: string }>(
+  params: UserErasureParams,
+  deps: ErasureCascade<File>,
+  ownership: ErasureOwnership,
+): Promise<void> {
   const { userId, tenantId, checkpointer, keepTransactions = false } = params;
-  const userObjectId = new mongoose.Types.ObjectId(userId);
 
   const checkpointDeletion = await deps.openCheckpointDeletion(
     userId,
@@ -348,7 +454,7 @@ export async function eraseUserData(
 
   await deps.deleteUserChatProjects(userId);
   await deps.deleteMessages({ user: userId });
-  await deps.deleteAllAgentQueuedTurnsForUser({ user: userObjectId });
+  await ownership.deleteQueuedTurnsForUser(userId);
   /** Before user keys: provider-stored files need the user's own assistants credentials. */
   const files = await deps.getFiles({ user: userId });
   const outcome = await deps.deleteStoredFiles(files ?? []);
@@ -372,7 +478,7 @@ export async function eraseUserData(
   /** Leaf collections nothing later in the erasure reads, so they are removed together. */
   await settleInOrder([
     keepTransactions ? undefined : deps.deleteTransactions({ user: userId }),
-    deps.deleteBalances({ user: userObjectId }),
+    ownership.deleteBalancesForUser(userId),
     deps.deletePresets(userId),
     deps.deleteAllUserPluginAuths(userId),
     deps.deleteToolCalls(userId),
@@ -384,7 +490,7 @@ export async function eraseUserData(
   ]);
   await deps.deleteSharedLinks(userId);
   await deps.deleteUserAgents(userId);
-  await deps.deleteAllAgentApiKeys(userObjectId);
+  await ownership.deleteAllAgentApiKeys(userId);
   await deps.deleteAssistants({ user: userId });
   await deps.deleteUserPrompts(userId);
   await deps.deleteUserSkills(userId);
@@ -392,7 +498,7 @@ export async function eraseUserData(
   await deps.deleteActions({ user: userId });
   await deps.deleteTokens({ userId });
   await deps.removeUserFromAllGroups(userId);
-  await deps.deleteAclEntries({ principalId: userObjectId });
+  await ownership.deleteAclEntriesForUser(userId);
   await deps.deleteSchedulesByUser(userId);
   await deps.deleteSubscriptions(userId);
 }

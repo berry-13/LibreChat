@@ -144,6 +144,7 @@ export function createTransactionMethods(
   deleteTransactions: (
     filter: FilterQuery<ITransaction>,
   ) => Promise<import('mongodb').DeleteResult>;
+  deleteBalancesForUser: (userId: string) => Promise<import('mongodb').DeleteResult>;
   deleteBalances: (filter: FilterQuery<IBalance>) => Promise<import('mongodb').DeleteResult>;
   createTransaction: (_txData: TxData) => Promise<TransactionResult | undefined>;
   reserveBalance: (request: BalanceReservationRequest) => Promise<BalanceReservationResult | null>;
@@ -830,6 +831,10 @@ export function createTransactionMethods(
     return Transaction.deleteMany(filter);
   }
 
+  async function deleteBalancesForUser(userId: string) {
+    return deleteBalances({ user: new mongoose.Types.ObjectId(userId) });
+  }
+
   /** Deletes balance records matching a filter. */
   async function deleteBalances(
     filter: FilterQuery<IBalance>,
@@ -872,6 +877,7 @@ export function createTransactionMethods(
     upsertBalanceFields,
     getTransactions,
     deleteTransactions,
+    deleteBalancesForUser,
     deleteBalances,
     createTransaction,
     reserveBalance,

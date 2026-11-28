@@ -74,7 +74,7 @@ jest.mock('@librechat/api', () => ({
     destroy: (...args) => mockDestroy(...args),
   },
   revokeUserCodeEnvironmentWorkers: (...args) => mockRevokeUserCodeEnvironmentWorkers(...args),
-  eraseUserData: (...args) => mockEraseUserData(...args),
+  eraseAccountData: (...args) => mockEraseUserData(...args),
   initializeFileStorage: (...args) => mockInitializeFileStorage(...args),
   openCheckpointDeletion: mockOpenCheckpointDeletion,
   deleteAllSharedLinksWithCleanup: mockDeleteAllSharedLinksWithCleanup,

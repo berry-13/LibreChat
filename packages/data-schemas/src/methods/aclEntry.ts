@@ -207,6 +207,7 @@ export function createAclEntryMethods(mongoose: typeof import('mongoose')): {
     resourceIds?: Types.ObjectId[],
     readPrimary?: boolean,
   ) => Promise<Types.ObjectId[]>;
+  deleteAclEntriesForUser: (userId: string) => Promise<DeleteResult>;
   deleteAclEntries: (
     filter: Record<string, unknown>,
     options?: { session?: ClientSession },
@@ -584,6 +585,10 @@ export function createAclEntryMethods(mongoose: typeof import('mongoose')): {
       query.read('primary');
     }
     return await query.distinct('resourceId');
+  }
+
+  async function deleteAclEntriesForUser(userId: string) {
+    return deleteAclEntries({ principalId: new Types.ObjectId(userId) });
   }
 
   /**
@@ -990,6 +995,7 @@ export function createAclEntryMethods(mongoose: typeof import('mongoose')): {
     grantPermission,
     modifyPermissionBits,
     findAccessibleResources,
+    deleteAclEntriesForUser,
     deleteAclEntries,
     deletePrincipalAclEntries,
     replaceRoleBits,

@@ -13,7 +13,7 @@ const {
 const { User } = createModels(mongoose);
 require('module-alias')({ base: path.resolve(__dirname, '..', 'api') });
 const {
-  eraseUserData,
+  eraseAccountData,
   createUserDeletionAttempt,
   GenerationJobManager,
   createStreamServices,
@@ -220,7 +220,7 @@ async function gracefulExit(code = 0) {
         ? tenantStorage.run({ tenantId: user.tenantId, userId: uid }, operation)
         : operation();
     await runAsSystem(() =>
-      eraseUserData(
+      eraseAccountData(
         {
           userId: uid,
           deletionAttemptId: deletionAttempt.id,

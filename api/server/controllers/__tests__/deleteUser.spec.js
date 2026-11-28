@@ -71,7 +71,8 @@ jest.mock('@librechat/api', () => ({
   needsRefresh: jest.fn(),
   getNewS3URL: jest.fn(),
   deleteAllSharedLinksWithCleanup: (...args) => mockDeleteAllSharedLinksWithCleanup(...args),
-  eraseUserData: jest.requireActual('../../../../packages/api/src/user/erasure.ts').eraseUserData,
+  eraseAccountData: jest.requireActual('../../../../packages/api/src/user/erasure.ts')
+    .eraseAccountData,
   createUserDeletionAttempt: jest.requireActual('../../../../packages/api/src/user/erasure.ts')
     .createUserDeletionAttempt,
   cancelUserDataDeletion: jest.requireActual('../../../../packages/api/src/user/erasure.ts')
@@ -121,7 +122,7 @@ jest.mock('~/models', () => ({
   deleteUserSkills: (...args) => mockDeleteUserSkills(...args),
   deleteUserCodeEnvironments: (...args) => mockDeleteUserCodeEnvironments(...args),
   deleteTransactions: jest.fn(),
-  deleteBalances: jest.fn(),
+  deleteBalancesForUser: jest.fn(),
   deleteAllAgentApiKeys: jest.fn(),
   deleteAssistants: jest.fn(),
   deleteConversationTags: jest.fn(),
@@ -129,11 +130,11 @@ jest.mock('~/models', () => ({
   deleteActions: jest.fn(),
   deleteTokens: jest.fn(),
   removeUserFromAllGroups: jest.fn(),
-  deleteAclEntries: jest.fn(),
+  deleteAclEntriesForUser: jest.fn(),
   deleteUserChatProjects: jest.fn(),
   deleteUserToolFavorites: jest.fn(),
   deleteRefreshTokenBridges: jest.fn(),
-  deleteAllAgentQueuedTurnsForUser: jest.fn(),
+  deleteQueuedTurnsForUser: jest.fn(),
   deleteSchedulesByUser: (...args) => mockDeleteSchedulesByUser(...args),
   getSoleOwnedResourceIds: jest.fn().mockResolvedValue([]),
   findUserErasableMCPServers: jest.fn().mockResolvedValue([]),

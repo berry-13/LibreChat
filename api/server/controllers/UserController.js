@@ -21,7 +21,7 @@ const {
   openCheckpointDeletion,
   stopUserGenerations,
   deleteAllSharedLinksWithCleanup,
-  eraseUserData,
+  eraseAccountData,
   createUserDeletionAttempt,
   deleteUserMCPServers,
   revokeUserCodeEnvironmentWorkers,
@@ -403,7 +403,7 @@ const deleteUserController = async (req, res) => {
         userId: user.id,
         tenantId,
       }));
-    await eraseUserData(
+    await eraseAccountData(
       {
         userId: user.id,
         deletionAttemptId: deletionAttempt.id,

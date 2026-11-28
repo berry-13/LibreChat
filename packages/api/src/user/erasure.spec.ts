@@ -20,9 +20,11 @@ import type { AppConfig } from '@librechat/data-schemas';
 import type { CheckpointDeletion } from '~/agents/checkpoints/deletion';
 import type { UserErasureDeps, MCPOAuthErasureHooks } from './erasure';
 import type { MCPOAuthTokens } from '~/mcp/oauth/types';
+import type { ErasureFile } from './resolver';
 import {
   deleteUserMCPServers,
   eraseUserData,
+  eraseAccountData,
   cancelUserDataDeletion,
   createUserDeletionAttempt,
 } from './erasure';
@@ -147,19 +149,20 @@ function createDeps() {
       order.push('acknowledge');
     }),
   };
-  const deps: UserErasureDeps = {
+  const deps = {
     ...methods,
     openCheckpointDeletion: jest.fn(async () => checkpointDeletion),
     deleteSharedLinks: deleteAllSharedLinksWithCleanup,
     deleteSubscriptions: createSubscriptions(mongoose).purge,
-    deleteStoredFiles: jest.fn(async (files) => {
+    deleteStoredFiles: jest.fn(async (files: ErasureFile[]) => {
       order.push('deleteStoredFiles');
       return { deletedFileIds: files.map((file) => file.file_id), failedFileIds: [] };
     }),
     invalidateMCPServerTools: jest.fn(async () => undefined),
     disconnectMCPServer: jest.fn(async () => undefined),
   };
-  return { deps, checkpointDeletion, order };
+  const legacy: UserErasureDeps = deps;
+  return { deps: legacy, plain: deps, checkpointDeletion, order };
 }
 
 async function finishSkillCleanup(skillId: mongoose.Types.ObjectId) {
@@ -187,15 +190,22 @@ async function finishSkillCleanup(skillId: mongoose.Types.ObjectId) {
 }
 
 describe('eraseUserData', () => {
-  it('clears skills, MCP servers, shared links, file objects and checkpoints', async () => {
+  const entries = ['plain', 'legacy'] as const;
+  it.each(entries)('@scenario:erasure clears only the target via %s', async (entry) => {
     const userId = new mongoose.Types.ObjectId();
     const otherId = new mongoose.Types.ObjectId();
     const user = userId.toString();
     const { skillId } = await seedUser(userId);
     const other = await seedUser(otherId);
-    const { deps, checkpointDeletion, order } = createDeps();
+    for (const owner of [userId, otherId]) {
+      await model('Balance').insertOne({ user: owner, tokenCredits: 1 });
+      await model('AgentApiKey').insertOne({ userId: owner, keyHash: owner.toString() });
+    }
+    const { deps, plain, checkpointDeletion, order } = createDeps();
 
-    await eraseUserData({ userId: user, tenantId: 'tenant-1', checkpointer: { ttl: 60 } }, deps);
+    const params = { userId: user, tenantId: 'tenant-1', checkpointer: { ttl: 60 } };
+    if (entry === 'plain') await eraseAccountData(params, plain);
+    else await eraseUserData(params, deps);
 
     expect(deps.openCheckpointDeletion).toHaveBeenCalledWith(user, 'tenant-1', undefined, {
       ttl: 60,
@@ -203,6 +213,10 @@ describe('eraseUserData', () => {
     expect(checkpointDeletion.remember).toHaveBeenCalledWith([`convo-${user}`]);
     expect(order.slice(0, 3)).toEqual(['remember', 'cleanup', 'acknowledge']);
     expect(await count('Conversation', { user })).toBe(0);
+    expect(await count('Balance', { user: userId })).toBe(0);
+    expect(await count('Balance', { user: otherId })).toBe(1);
+    expect(await count('AgentApiKey', { userId })).toBe(0);
+    expect(await count('AgentApiKey', { userId: otherId })).toBe(1);
 
     expect(deps.deleteStoredFiles).toHaveBeenCalledTimes(1);
     const storedFiles = (deps.deleteStoredFiles as jest.Mock).mock.calls[0][0];
