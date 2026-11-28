@@ -32,7 +32,7 @@ import {
   reasoningOverrideSchema,
   ReasoningParameterFormat,
 } from './schemas';
-import { isGeminiHydrogen, supportsGeminiXHighThinking } from './gemini';
+import { getGeminiForegroundLimits, supportsGeminiXHighThinking } from './gemini';
 import { resolveEffectiveUseResponsesApi } from './file-config';
 import { gpt6Tier, gpt6Release } from './families';
 import { clampSettingRange } from './generate';
@@ -1874,7 +1874,7 @@ function applyModelFamilyDefaults(
               return {
                 ...setting,
                 default: max,
-                ...(isGeminiHydrogen(model) &&
+                ...(getGeminiForegroundLimits(model) &&
                   setting.range && { range: { ...setting.range, max, modelSpecific: true } }),
               };
             }

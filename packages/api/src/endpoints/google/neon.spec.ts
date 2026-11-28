@@ -1,6 +1,7 @@
 import { Providers } from '@librechat/agents';
 import { AuthKeys, ThinkingLevel } from 'librechat-data-provider';
-import { getGoogleConfig } from './llm';
+import { getGoogleConfig, getGoogleInputTokenLimit } from './llm';
+import { getGoogleTokenConfig } from './pricing';
 
 describe('Gemini 4 Neon request contract', () => {
   const originalEnv = process.env;
@@ -59,12 +60,47 @@ describe('Gemini 4 Neon request contract', () => {
       expect(result.llmConfig).not.toHaveProperty('thinkingConfig.thinkingBudget');
     });
 
+    it('clamps admin output and normalizes an unspecified thinking level', () => {
+      const { llmConfig } = getGoogleConfig(credentials, {
+        modelOptions: { model: 'gemini-4-neon' },
+        defaultParams: { thinkingLevel: 'THINKING_LEVEL_UNSPECIFIED' },
+        addParams: { maxOutputTokens: 1000000 },
+      });
+      expect(llmConfig).toMatchObject({
+        maxOutputTokens: 65536,
+        thinkingConfig: { thinkingLevel: 'HIGH' },
+      });
+    });
+
     it('applies the Neon handling to versioned and provider-prefixed ids', () => {
       const result = getGoogleConfig(credentials, {
         modelOptions: { model: 'models/gemini-4-neon-001', temperature: 0.7 },
       });
       expect(result.llmConfig).not.toHaveProperty('temperature');
-      expect(result.llmConfig).toMatchObject({ thinkingConfig: { thinkingLevel: 'HIGH' } });
+      expect(result.llmConfig).toMatchObject({
+        maxOutputTokens: 65536,
+        thinkingConfig: { thinkingLevel: 'HIGH' },
+      });
+    });
+  });
+
+  it('reserves the configured or default response inside the shared window', () => {
+    expect(getGoogleInputTokenLimit('gemini-4-neon')).toBe(983040);
+    expect(getGoogleInputTokenLimit('models/gemini-4-neon-001', 4096)).toBe(1044480);
+    expect(getGoogleInputTokenLimit('gemini-4-neon', 1000000)).toBe(983040);
+  });
+
+  it.each([
+    [undefined, 3, 0.15, 15],
+    ['global', 3, 0.15, 15],
+    ['eu', 3.3, 0.165, 16.5],
+    ['us', 3.3, 0.165, 16.5],
+  ] as const)('resolves billing rates for %s', (location, prompt, read, completion) => {
+    expect(getGoogleTokenConfig('models/gemini-4-neon', undefined, location)).toEqual({
+      prompt,
+      completion,
+      read,
+      cacheRead: read,
     });
   });
 

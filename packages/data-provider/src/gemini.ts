@@ -1,6 +1,16 @@
 export const GEMINI_HYDROGEN_CONTEXT_TOKENS = 1_048_576;
 export const GEMINI_HYDROGEN_OUTPUT_TOKENS = 65_536;
 
+const foreground = {
+  context: GEMINI_HYDROGEN_CONTEXT_TOKENS,
+  output: GEMINI_HYDROGEN_OUTPUT_TOKENS,
+} as const;
+
+/** Native models that reserve a foreground segment inside a unified context window. */
+export function getGeminiForegroundLimits(model?: string | null) {
+  return isGeminiHydrogen(model) || isGeminiNeon(model) ? foreground : undefined;
+}
+
 /** Match native and provider-prefixed IDs, including versioned Hydrogen aliases. */
 export function isGeminiHydrogen(model?: string | null): boolean {
   const id = model?.toLowerCase().split('/').pop() ?? '';

@@ -1,4 +1,4 @@
-import { isGeminiHydrogen, getGeminiHydrogenRates } from 'librechat-data-provider';
+import { isGeminiNeon, isGeminiHydrogen, getGeminiHydrogenRates } from 'librechat-data-provider';
 import type { TGoogleTokenConfig } from 'librechat-data-provider';
 import type { EndpointTokenConfig } from '~/types';
 
@@ -16,6 +16,11 @@ export function getGoogleTokenConfig(
   const rates = key == null ? undefined : configured?.[key];
   if (rates) {
     return { ...rates, read: rates.cacheRead };
+  }
+  if (isGeminiNeon(model)) {
+    const regional = location != null && location !== '' && location !== 'global';
+    const read = regional ? 0.165 : 0.15;
+    return { prompt: regional ? 3.3 : 3, completion: regional ? 16.5 : 15, read, cacheRead: read };
   }
   if (!isGeminiHydrogen(model)) {
     return undefined;

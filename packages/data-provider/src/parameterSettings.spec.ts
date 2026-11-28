@@ -51,6 +51,7 @@ describe('applyModelAwareDefaults', () => {
     'offers Neon thinking levels without budget and sampling controls in chat and Agents',
     (settings) => {
       const result = applyModelAwareDefaults(settings, EModelEndpoint.google, 'gemini-4-neon');
+      expect(maxOut(result)).toMatchObject({ default: 65536, range: { max: 65536 } });
       expect(result.find((setting) => setting.key === 'thinkingLevel')?.options).toEqual([
         '',
         'low',

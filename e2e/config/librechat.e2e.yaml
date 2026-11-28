@@ -539,6 +539,12 @@ modelSpecs:
         endpoint: google
         model: gemini-4-hydrogen
 
+    - name: 'e2e-native-neon'
+      label: 'Neon Fixture'
+      preset:
+        endpoint: google
+        model: gemini-4-neon
+
 # Short enough that a stalled fake RAG query fails the tool call well inside a test.
 timeouts:
   ragMs: 3000

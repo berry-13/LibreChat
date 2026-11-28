@@ -10,10 +10,10 @@ import {
   CODE_WORKSPACE_CHECKOUT_MODES,
   MAX_AGENT_CODE_ENVIRONMENT_CHOICES,
 } from './code/workspace';
-import { isGeminiHydrogen, GEMINI_HYDROGEN_OUTPUT_TOKENS } from './gemini';
 import { userSubmittedMessageFieldPathSchema } from './filters';
 import { TFeedback, feedbackSchema } from './feedback';
 import { CODE_APPROVAL_MODES } from './code/approval';
+import { getGeminiForegroundLimits } from './gemini';
 import { Tools } from './types/tools';
 
 export const isUUID = z.guid();
@@ -547,8 +547,9 @@ const GOOGLE_LEGACY_MAX_OUTPUT = 8192 as const;
  * (2.0 and earlier, including legacy image models) and Gemma retain the 8K limit.
  */
 const getGoogleMaxOutputTokens = (modelName: string): number => {
-  if (isGeminiHydrogen(modelName)) {
-    return GEMINI_HYDROGEN_OUTPUT_TOKENS;
+  const limits = getGeminiForegroundLimits(modelName);
+  if (limits) {
+    return limits.output;
   }
   if (/gemini-(?:2\.5|[3-9]|\d{2,})/i.test(modelName)) {
     if (/image/i.test(modelName)) {

@@ -227,7 +227,13 @@ const baseEnv = {
   FLUX_API_BASE_URL: `http://127.0.0.1:${FLUX_PORT}`,
   /** Enables the native Google provider for agents. The run hook replaces the model, so the
    *  key never reaches Google; it only lets attachments take the Google encoding path. */
-  GOOGLE_KEY: 'e2e-mock-google-key',
+  ...(process.env.E2E_GOOGLE_VERTEX === 'true'
+    ? {
+        GOOGLE_SERVICE_KEY_FILE: JSON.stringify({ project_id: 'e2e-neon' }),
+        GOOGLE_LOC: 'eu',
+        GOOGLE_KEY: '',
+      }
+    : { GOOGLE_KEY: 'e2e-mock-google-key' }),
   ...(process.env.E2E_CODE_BRIDGE_ADMIN_TOKEN
     ? { E2E_CODE_BRIDGE_ADMIN_TOKEN: process.env.E2E_CODE_BRIDGE_ADMIN_TOKEN }
     : {}),

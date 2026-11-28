@@ -38,16 +38,23 @@ describe('resolveTokenConfigMap', () => {
     'keeps Developer and Cloud estimates distinct with googleUsesVertex=%s',
     async (googleUsesVertex) => {
       const model = 'gemini-4-hydrogen';
+      const neon = 'gemini-4-neon';
       const map = await resolveTokenConfigMap(
         {
           appConfig: appConfigWith([]),
-          modelsConfig: { google: [model] },
+          modelsConfig: { google: [model, neon] },
           userId: 'user-1',
           googleUsesVertex,
           googleLocation: 'eu',
         },
         deps,
       );
+      expect(map.google[neon]).toMatchObject({
+        prompt: googleUsesVertex ? 3.3 : 3,
+        completion: googleUsesVertex ? 16.5 : 15,
+        cacheRead: googleUsesVertex ? 0.165 : 0.15,
+      });
+      expect(map.vertexai[neon]).toMatchObject({ prompt: 3.3, completion: 16.5, cacheRead: 0.165 });
       expect(map.google[model]).toMatchObject({
         prompt: googleUsesVertex ? 1.65 : 1.5,
         completion: googleUsesVertex ? 8.25 : 7.5,
