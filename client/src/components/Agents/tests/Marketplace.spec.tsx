@@ -47,17 +47,19 @@ const mockLocalize = jest.fn((key: string, options?: { count?: number; category?
   return translations[key] || key;
 });
 
+let mockAppTitle: string | undefined;
 let mockHasAccess = true;
 
 jest.mock('~/hooks', () => ({
   useLocalize: () => mockLocalize,
-  useDocumentTitle: jest.fn(),
+  useDocumentTitle: jest.requireActual('~/hooks/useDocumentTitle').default,
   useHasAccess: jest.fn(() => mockHasAccess),
   useAgentCategories: jest.fn(() => ({ categories: mockCategories })),
   useDebounce: (value: string) => value,
 }));
 
 jest.mock('~/data-provider', () => ({
+  useGetStartupConfig: () => ({ data: { appTitle: mockAppTitle } }),
   useGetEndpointsQuery: jest.fn(() => ({ data: {} })),
   useGetAgentCategoriesQuery: jest.fn(() => ({ data: mockCategories, isLoading: false })),
 }));
@@ -161,6 +163,7 @@ const currentUrl = () => screen.getByTestId('location').textContent;
 
 describe('Marketplace controls and agent results', () => {
   beforeEach(() => {
+    mockAppTitle = undefined;
     mockHasAccess = true;
     marketplace.mockReset();
   });
@@ -170,6 +173,21 @@ describe('Marketplace controls and agent results', () => {
       queryClient.clear();
     }
     queryClients.clear();
+  });
+
+  it.each([
+    ['Acme', 'Acme'],
+    ['', 'LibreChat'],
+  ])('sets the Marketplace tab title when the app title is "%s"', async (configured, expected) => {
+    const previous = document.title;
+    mockAppTitle = configured;
+    try {
+      renderMarketplace();
+      await screen.findByRole('list');
+      expect(document.title).toBe(`Agent Marketplace | ${expected}`);
+    } finally {
+      document.title = previous;
+    }
   });
 
   it('shows the newly sorted results after changing the sort control', async () => {
