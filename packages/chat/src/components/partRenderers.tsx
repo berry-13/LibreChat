@@ -8,6 +8,7 @@ import {
   isImageVisionTool,
   hasToolCallPreview,
   getToolCallPreviewRevision,
+  getPendingToolApproval,
 } from 'librechat-data-provider';
 import type { PartMetadata, TMessageContentParts } from 'librechat-data-provider';
 import type { ReactNode } from 'react';
@@ -433,17 +434,14 @@ const wrapTool = (card: ReactNode, { toolCall, isSubmitting }: ToolRenderProps):
       {card}
     </ToolPreparation>
   );
-  if (toolCall.approval == null || (toolCall.output?.length ?? 0) > 0) {
+  const approval = getPendingToolApproval(toolCall);
+  if (approval == null) {
     return framed;
   }
   return (
     <>
       {framed}
-      <HostedToolApproval
-        approval={toolCall.approval}
-        toolCallId={toolCall.id ?? ''}
-        args={toolCall.args}
-      />
+      <HostedToolApproval approval={approval} toolCallId={toolCall.id ?? ''} args={toolCall.args} />
     </>
   );
 };

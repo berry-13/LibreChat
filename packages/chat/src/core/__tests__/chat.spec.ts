@@ -2238,9 +2238,10 @@ describe('Chat', () => {
       const { chat, transport, stream, sent } = await pause(approvalAction);
       expect(chat.pendingAction).toBe(approvalAction);
 
-      await chat.addToolApprovalResponse({ id: 'call-1', approved: true });
+      await chat.addToolApprovalResponse({ id: 'call-1', approved: true, reason: 'Private note' });
       expect(transport.resume).not.toHaveBeenCalled();
       const [first] = chat.messages[1].content as Array<{ tool_call: Agents.ToolCall }>;
+      expect(first.tool_call.approval).not.toHaveProperty('reason');
       expect(first.tool_call).toMatchObject({ approval: { decision: 'approve' } });
 
       await chat.addToolApprovalResponse({ id: 'call-2', approved: false, reason: 'No' });
@@ -2251,7 +2252,7 @@ describe('Chat', () => {
         generationCreatedAt: 100,
         actionId: 'action-1',
         decisions: [
-          { tool_call_id: 'call-1', decision: 'approve' },
+          { tool_call_id: 'call-1', decision: 'approve', reason: 'Private note' },
           { tool_call_id: 'call-2', decision: 'reject', reason: 'No' },
         ],
       });

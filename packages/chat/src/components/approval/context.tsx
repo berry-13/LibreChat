@@ -15,6 +15,7 @@ import type { AskAnswerStatus } from '../../react/parts/ask';
 import { pendingApprovalActionFamily, useApprovalResumeHost } from '../../react/approval';
 import { resolveAskUserQuestionPart } from '../../core/parts/questions';
 import { askSubmitStatusAtom } from '../../react/parts/ask';
+import { markApproval } from '../../core/pending';
 
 export interface ResumeSubmitTransport {
   submitToolApproval: (
@@ -471,6 +472,11 @@ export function useResumeSubmit(host: ApprovalResumeHost | null = null): {
         onSuccess: () => {
           setStatus(actionId, 'submitted');
           if (!fields) return;
+          if (resumeHost?.readFields()?.conversationId === fields.conversationId) {
+            const thread = resumeHost.readMessages();
+            const next = thread && markApproval(thread.messages, actionId, decisions);
+            if (next) thread.setMessages(next);
+          }
           const pendingAtom = pendingApprovalActionFamily(fields.conversationId);
           if (jotaiStore.get(pendingAtom)?.actionId === actionId) jotaiStore.set(pendingAtom, null);
         },

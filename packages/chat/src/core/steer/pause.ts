@@ -1,4 +1,4 @@
-import { ContentTypes } from 'librechat-data-provider';
+import { ContentTypes, getPendingToolApproval } from 'librechat-data-provider';
 import type { TMessage, TMessageContentParts } from 'librechat-data-provider';
 import { findLiveAskUserQuestion } from '../ask';
 
@@ -48,7 +48,7 @@ export function hasLiveToolApproval(
     const toolCall = part[ContentTypes.TOOL_CALL] as
       | { approval?: unknown; output?: string | null }
       | undefined;
-    return toolCall?.approval != null && (toolCall.output?.length ?? 0) === 0;
+    return getPendingToolApproval(toolCall) != null;
   });
 }
 

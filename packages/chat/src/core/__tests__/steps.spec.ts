@@ -783,6 +783,28 @@ describe('steps', () => {
       ).toBeUndefined();
     });
 
+    it('keeps the matching approval decision through tool completion', () => {
+      const approval = { actionId: 'action', decision: 'reject' as const, allowed_decisions: [] };
+      const message = createResponse([
+        {
+          type: ContentTypes.TOOL_CALL,
+          tool_call: { id: 'call', name: 'search', type: ToolCallTypes.TOOL_CALL, approval },
+        },
+      ]);
+      const step = toolStep('step', 0, [{ id: 'call', name: 'search', args: '' }]);
+      const completed = applyToolCallCompleted(
+        message,
+        step,
+        toolEnd('step', {
+          id: 'call',
+          name: 'search',
+          output: 'Blocked',
+        }),
+        0,
+      );
+      expect(toolCallAt(completed, 0)).toMatchObject({ approval, output: 'Blocked' });
+    });
+
     it('records the last non-empty tool call id announced by a step', () => {
       const parallel = toolStep('step-many', 0, [
         { id: 'call-a', name: 'a', args: '' },

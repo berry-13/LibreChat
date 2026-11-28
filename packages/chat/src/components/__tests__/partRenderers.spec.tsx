@@ -365,6 +365,13 @@ describe('paused tool calls and questions', () => {
     expect(getByTestId('tool-approval')).toHaveAttribute('data-tool-call-id', 'call_1');
   });
 
+  it('keeps a completed approval with empty output resolved on reload', () => {
+    const saved = draw(
+      pausedCall({ output: '', approval: { actionId: 'a1', decision: 'approve' } }),
+    );
+    expect(saved.queryByTestId('tool-approval')).not.toBeInTheDocument();
+  });
+
   it('shows no approval controls once the call has output, or when it never paused', () => {
     const answered = draw(pausedCall({ output: 'done', approval: { actionId: 'a1' } }));
     expect(answered.queryByTestId('tool-approval')).not.toBeInTheDocument();

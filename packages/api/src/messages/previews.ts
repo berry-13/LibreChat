@@ -7,6 +7,7 @@ import {
   TOOL_CALL_PREVIEWS_VERSION,
   COMMAND_RESULT_TRAILER,
   hasToolCallPreview,
+  getPendingToolApproval,
   toolCallPreviewsConfigSchema,
 } from 'librechat-data-provider';
 import type {
@@ -149,7 +150,7 @@ function toolCallIdentity(part: StoredToolCallPart & { tool_call: StoredToolCall
  * and its transcript is as large as any other.
  */
 const isSettled = (toolCall: StoredToolCall): boolean => {
-  if (toolCall.approval != null && !hasOutput(toolCall)) {
+  if (getPendingToolApproval(toolCall) != null) {
     return false;
   }
   return (
@@ -169,7 +170,7 @@ function hasPendingApproval(parts: unknown[]): boolean {
         continue;
       }
       const toolCall = part.tool_call;
-      if (toolCall.approval != null && !hasOutput(toolCall)) {
+      if (getPendingToolApproval(toolCall) != null) {
         return true;
       }
       if (Array.isArray(toolCall.subagent_content)) {

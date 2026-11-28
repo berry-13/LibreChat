@@ -7,7 +7,7 @@ import type {
   EventHandler,
   RunStep,
 } from '@librechat/agents';
-import type { Agents } from 'librechat-data-provider';
+import type { Agents, TMessageContentParts } from 'librechat-data-provider';
 import { ASK_USER_QUESTION_TOOL_NAME } from './askUserQuestionTool';
 import { isToolApprovalPayloadValid } from './policy';
 
@@ -31,6 +31,49 @@ export function mapToolApprovalResolutions(
     decisions[resolution.tool_call_id] = toSdkDecision(resolution);
   }
   return decisions;
+}
+
+/** Attach the accepted batch after aggregation, which rebuilds completed tool calls. */
+export function stampApprovalDecisions(
+  content: readonly TMessageContentParts[],
+  action: Agents.PendingAction | undefined,
+  resolutions: readonly Agents.ToolApprovalResolution[] | undefined,
+): void {
+  if (action?.payload.type !== 'tool_approval' || !resolutions?.length) {
+    return;
+  }
+  const decisions = new Map(resolutions.map((item) => [item.tool_call_id, item]));
+  const configs = new Map(action.payload.review_configs.map((item) => [item.tool_call_id, item]));
+  const requests = new Map(action.payload.action_requests.map((item) => [item.tool_call_id, item]));
+  const visit = (parts: readonly TMessageContentParts[]) => {
+    for (const part of parts) {
+      if (part?.type !== 'tool_call' || !part.tool_call) {
+        continue;
+      }
+      const call = part.tool_call as Agents.ToolCall & {
+        subagent_content?: TMessageContentParts[];
+      };
+      if (Array.isArray(call.subagent_content)) {
+        visit(call.subagent_content);
+      }
+      const resolution = decisions.get(call.id ?? '');
+      const request = requests.get(call.id ?? '');
+      if (!resolution || !request || !('name' in call)) {
+        continue;
+      }
+      call.approval = {
+        actionId: action.actionId,
+        allowed_decisions: configs.get(request.tool_call_id)?.allowed_decisions ?? [],
+        description: request.description,
+        decision: resolution.decision,
+        ...(resolution.decision === 'reject' &&
+          resolution.reason !== undefined && {
+            reason: resolution.reason,
+          }),
+      };
+    }
+  };
+  visit(content);
 }
 
 function toSdkDecision(resolution: Agents.ToolApprovalResolution): ToolApprovalDecision {

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import type { Route } from '@playwright/test';
+import type { Page, Route } from '@playwright/test';
 import type { ApprovalResumeResponse } from './approvals.helpers';
 import {
   APPROVAL_ERROR,
@@ -23,6 +23,25 @@ import {
 import { NEW_CHAT_PATH, getAccessToken, messagesView, requestJson } from './helpers';
 import { cleanupAgent } from './agents.helpers';
 import { unroute } from './fixtures';
+
+async function expectSavedApproval(
+  page: Page,
+  conversationId: string,
+  callId: string,
+  expected: { decision: 'reject' | 'respond'; reason?: string },
+) {
+  const token = await getAccessToken(page);
+  type Message = { content?: Array<{ tool_call?: { id?: string; approval?: typeof expected } }> };
+  const messages = await requestJson<Message[]>(page, {
+    path: `/api/messages/${encodeURIComponent(conversationId)}`,
+    token,
+  });
+  const call = messages
+    .flatMap((message) => message.content ?? [])
+    .find((part) => part.tool_call?.id === callId)?.tool_call;
+  expect(call?.approval).toMatchObject(expected);
+  expect(call?.approval?.reason).toBe(expected.reason);
+}
 
 test.describe('tool approvals', () => {
   test('approves a paused tool with its original arguments', async ({ page }) => {
@@ -80,7 +99,9 @@ test.describe('tool approvals', () => {
     }
   });
 
-  test('rejects with an optional reason without executing the tool', async ({ page }) => {
+  test('rejects with an optional reason without executing the tool @scenario:reject-reloads', async ({
+    page,
+  }) => {
     test.setTimeout(120000);
     const label = uniqueLabel();
     const toolCallId = `call_e2e_approval_${label}`;
@@ -108,6 +129,10 @@ test.describe('tool approvals', () => {
       ]);
 
       await expectCompletedApprovalToolOutput(page, toolCallId, `Blocked: ${reason}`);
+      await expectSavedApproval(page, body.conversationId!, toolCallId, {
+        decision: 'reject',
+        reason,
+      });
       await expectApprovalInvocationCount(originalValue, 0);
       await expect(approvalCards(page)).toHaveCount(0);
     } finally {
@@ -168,7 +193,9 @@ test.describe('tool approvals', () => {
     }
   });
 
-  test('requires a nonblank substitute response and skips tool execution', async ({ page }) => {
+  test('requires a nonblank substitute response and skips tool execution @scenario:respond-reloads', async ({
+    page,
+  }) => {
     test.setTimeout(120000);
     const label = uniqueLabel();
     const toolCallId = `call_e2e_approval_${label}`;
@@ -199,6 +226,7 @@ test.describe('tool approvals', () => {
       ]);
 
       await expectCompletedApprovalToolOutput(page, toolCallId, responseText);
+      await expectSavedApproval(page, body.conversationId!, toolCallId, { decision: 'respond' });
       await expectApprovalInvocationCount(originalValue, 0);
     } finally {
       clearApprovalInvocations(originalValue);

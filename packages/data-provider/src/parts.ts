@@ -476,6 +476,17 @@ const resolveFailure = (
   return reason ? { reason, detail: false } : undefined;
 };
 
+/** A resumed call can finish with empty output. Its recorded decision resolves the approval. */
+export function getPendingToolApproval<T>(call: { approval?: T; output?: unknown } | undefined) {
+  const approval = call?.approval;
+  if (approval == null || (typeof call?.output === 'string' && call.output.length > 0)) {
+    return undefined;
+  }
+  return typeof approval === 'object' && 'decision' in approval && approval.decision != null
+    ? undefined
+    : approval;
+}
+
 const approvingDecisions = new Set<Agents.ToolApprovalDecisionType>(['approve', 'edit']);
 
 const getToolApproval = (toolCall: ToolCallValue): UIToolApproval | undefined => {

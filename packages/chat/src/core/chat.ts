@@ -1,4 +1,4 @@
-import { Constants, ContentTypes, ApprovalEvents } from 'librechat-data-provider';
+import { Constants, ApprovalEvents } from 'librechat-data-provider';
 import type {
   Agents,
   TPayload,
@@ -9,7 +9,6 @@ import type {
   ChatFinalFrame,
   ChatSyncFrame,
   ChatErrorData,
-  TMessageContentParts,
   UIMessageMetadata,
 } from 'librechat-data-provider';
 import type {
@@ -28,6 +27,7 @@ import type {
 } from './types';
 import { isRetryableNetworkError } from './resumable/start';
 import { SerialJobExecutor } from './executor';
+import { markApproval } from './pending';
 
 /**
  * Where a chat keeps its messages, status and error. AI SDK: `ChatState`. The app backs it with
@@ -633,81 +633,6 @@ const createEventContext = (
   },
   write,
 });
-
-/** A tool call that may hold a subagent's own tool calls, where a paused tool can live. */
-type NestedToolCall = Agents.ToolCall & { subagent_content?: TMessageContentParts[] };
-
-/**
- * Writes `decision` onto the tool calls of `actionId` with the given id in `parts`, descending into
- * subagent calls the way the pause was tagged. Returns the new parts, or nothing when none matched.
- */
-const markApprovalIn = (
-  parts: TMessageContentParts[],
-  actionId: string,
-  toolCallId: string,
-  decision: Agents.ToolApprovalResolution,
-): TMessageContentParts[] | undefined => {
-  let next: TMessageContentParts[] | undefined;
-  parts.forEach((part, index) => {
-    if (part?.type !== ContentTypes.TOOL_CALL) {
-      return;
-    }
-    const toolCall = part.tool_call as NestedToolCall | undefined;
-    if (!toolCall) {
-      return;
-    }
-    let marked = toolCall;
-    const nested = Array.isArray(toolCall.subagent_content)
-      ? markApprovalIn(toolCall.subagent_content, actionId, toolCallId, decision)
-      : undefined;
-    if (nested) {
-      marked = { ...marked, subagent_content: nested };
-    }
-    if (
-      'approval' in toolCall &&
-      toolCall.id === toolCallId &&
-      toolCall.approval?.actionId === actionId
-    ) {
-      const approval = {
-        ...toolCall.approval,
-        decision: decision.decision,
-        reason: decision.reason,
-      };
-      if (decision.reason === undefined) {
-        /** A changed decision shows only its own reason. */
-        delete approval.reason;
-      }
-      marked = { ...marked, approval };
-    }
-    if (marked === toolCall) {
-      return;
-    }
-    next ??= [...parts];
-    next[index] = { ...part, tool_call: marked } as TMessageContentParts;
-  });
-  return next;
-};
-
-/** Writes `decision` onto every tool call of `actionId` with the given id. */
-const markApproval = (
-  messages: TMessage[],
-  actionId: string,
-  toolCallId: string,
-  decision: Agents.ToolApprovalResolution,
-): TMessage[] | undefined => {
-  let changed = false;
-  const next = messages.map((message) => {
-    const content = message.content
-      ? markApprovalIn(message.content, actionId, toolCallId, decision)
-      : undefined;
-    if (!content) {
-      return message;
-    }
-    changed = true;
-    return { ...message, content };
-  });
-  return changed ? next : undefined;
-};
 
 /**
  * Where a removed row goes back: after the nearest earlier row of `before` still listed, else
@@ -1955,7 +1880,7 @@ export class Chat {
     };
     this.decisions.set(response.id, decision);
     await this.executor.run(() => {
-      const next = markApproval(this.messages, action.actionId, response.id, decision);
+      const next = markApproval(this.messages, action.actionId, [decision]);
       if (next) {
         this.write(next);
       }

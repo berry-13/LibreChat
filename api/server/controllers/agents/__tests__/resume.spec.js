@@ -4694,6 +4694,13 @@ describe('ResumeAgentController (POST /agents/chat/resume)', () => {
               userSubmittedMessageFieldPaths: [{ path: expectedPath, field: expectedField }],
             }
           : { userSubmittedPaths: [expectedPath] };
+        const call = mockSaveMessage.mock.calls[0][1].content[0].tool_call;
+        expect(call.approval).toMatchObject({ actionId: ACTION_ID, decision: resolution.decision });
+        if (resolution.decision === 'reject') {
+          expect(call.approval.reason).toBe(resolution.reason);
+        } else {
+          expect(call.approval).not.toHaveProperty('reason');
+        }
         expectProvenanceClaimed(expectedProvenance);
         expect(mockSaveMessage).toHaveBeenCalledWith(
           expect.anything(),

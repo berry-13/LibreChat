@@ -386,6 +386,10 @@ function writeContent(
       args,
       stepId: getNonEmptyValue([contentPart.tool_call.stepId, existingToolCall?.stepId]),
       type: ToolCallTypes.TOOL_CALL,
+      ...(existingToolCall?.id === id &&
+        existingToolCall.approval && {
+          approval: existingToolCall.approval,
+        }),
       auth: contentPart.tool_call.auth,
       expires_at: contentPart.tool_call.expires_at,
       toolPreparationStartedAt:

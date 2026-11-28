@@ -35,6 +35,7 @@ const {
   preflightResumeContent,
   reportLocatorTraversalFailure,
   getResumeProvenance,
+  stampApprovalDecisions,
   getUserFacingResumeError,
   decrementPendingRequest,
   checkAndIncrementPendingRequest,
@@ -327,7 +328,14 @@ async function resolveSegmentContent(client, streamId, expectedCreatedAt) {
  * the user loses everything streamed during this segment. Saved as a partial (`$set`,
  * still `unfinished`) so a subsequent successful resume overwrites it on finalize.
  */
-async function persistRePauseProgress({ req, client, job, streamId, conversationId }) {
+async function persistRePauseProgress({
+  req,
+  client,
+  job,
+  streamId,
+  conversationId,
+  pendingAction,
+}) {
   const userId = req.user.id;
   const meta = job.metadata ?? {};
   const responseMessageId = meta.responseMessageId ?? client.responseMessageId;
@@ -335,6 +343,7 @@ async function persistRePauseProgress({ req, client, job, streamId, conversation
     return;
   }
   const content = await resolveSegmentContent(client, streamId, job.createdAt);
+  stampApprovalDecisions(content, pendingAction, req.body.decisions);
   const { userSubmittedPaths, userSubmittedMessageFieldPaths } = getResumeProvenance({
     content,
     pendingAction: meta.pendingAction,
@@ -417,6 +426,7 @@ function resolveResumeValue(pendingAction, body) {
  * successful finish. Best-effort title generation for a first-turn pause.
  */
 async function finalizeResumedTurn({
+  pendingAction,
   req,
   client,
   job,
@@ -468,6 +478,7 @@ async function finalizeResumedTurn({
   // drop empty/malformed tool_call parts so a resumed turn can't persist an invalid
   // part that breaks reload/rendering.
   const content = filterMalformedContentParts(rawContent);
+  stampApprovalDecisions(content, pendingAction, req.body.decisions);
   const { userSubmittedPaths, userSubmittedMessageFieldPaths } = getResumeProvenance({
     content,
     pendingAction: meta.pendingAction,
@@ -2102,7 +2113,14 @@ const ResumeAgentController = async (req, res, next, initializeClient, addTitle)
             // overwrites content and merges attachments onto the saved message. A failed
             // required write must reject into the error-finalization path rather than expose
             // the next action while its preceding segment is absent from durable history.
-            await persistRePauseProgress({ req, client, job, streamId, conversationId });
+            await persistRePauseProgress({
+              req,
+              client,
+              job,
+              streamId,
+              conversationId,
+              pendingAction,
+            });
           } catch (pausePersistenceError) {
             pausePersistenceFailed = true;
             try {
@@ -2180,6 +2198,7 @@ const ResumeAgentController = async (req, res, next, initializeClient, addTitle)
       }
 
       await finalizeResumedTurn({
+        pendingAction,
         req,
         client,
         job,

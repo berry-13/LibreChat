@@ -1,4 +1,4 @@
-import { ContentTypes } from 'librechat-data-provider';
+import { ContentTypes, getPendingToolApproval } from 'librechat-data-provider';
 import type { Agents, TMessage, TMessageContentParts } from 'librechat-data-provider';
 import type { AskUserQuestionPart } from './ask';
 import { ASK_USER_QUESTION, isAskUserQuestionPart } from './ask';
@@ -266,7 +266,7 @@ export function hasPendingApprovalInPart(part: TMessageContentParts): boolean {
   if (!toolCall) {
     return false;
   }
-  if (toolCall.approval != null && (toolCall.output?.length ?? 0) === 0) {
+  if (getPendingToolApproval(toolCall) != null) {
     return true;
   }
   return (
@@ -296,3 +296,74 @@ export function hasPendingAuthInPart(part: TMessageContentParts): boolean {
     (standardToolCall.progress ?? 0.1) < 1
   );
 }
+
+/** A tool call that may hold a subagent's own tool calls, where a paused tool can live. */
+type NestedToolCall = Agents.ToolCall & { subagent_content?: TMessageContentParts[] };
+
+/**
+ * Writes the submitted decisions onto matching calls of `actionId`, descending into
+ * subagent calls the way the pause was tagged. Returns the new parts, or nothing when none matched.
+ */
+const markApprovalIn = (
+  parts: TMessageContentParts[],
+  actionId: string,
+  decisions: ReadonlyMap<string, Agents.ToolApprovalResolution>,
+): TMessageContentParts[] | undefined => {
+  let next: TMessageContentParts[] | undefined;
+  parts.forEach((part, index) => {
+    if (part?.type !== ContentTypes.TOOL_CALL) {
+      return;
+    }
+    const toolCall = part.tool_call as NestedToolCall | undefined;
+    if (!toolCall) {
+      return;
+    }
+    let marked = toolCall;
+    const nested = Array.isArray(toolCall.subagent_content)
+      ? markApprovalIn(toolCall.subagent_content, actionId, decisions)
+      : undefined;
+    if (nested) {
+      marked = { ...marked, subagent_content: nested };
+    }
+    const decision = decisions.get(toolCall.id ?? '');
+    if (decision && 'approval' in toolCall && toolCall.approval?.actionId === actionId) {
+      const approval = {
+        ...toolCall.approval,
+        decision: decision.decision,
+        reason: decision.decision === 'reject' ? decision.reason : undefined,
+      };
+      if (approval.reason === undefined) {
+        /** A changed decision shows only its own reason. */
+        delete approval.reason;
+      }
+      marked = { ...marked, approval };
+    }
+    if (marked === toolCall) {
+      return;
+    }
+    next ??= [...parts];
+    next[index] = { ...part, tool_call: marked } as TMessageContentParts;
+  });
+  return next;
+};
+
+/** Writes the batch onto calls tagged for this action. */
+export const markApproval = (
+  messages: TMessage[],
+  actionId: string,
+  resolutions: readonly Agents.ToolApprovalResolution[],
+): TMessage[] | undefined => {
+  const decisions = new Map(resolutions.map((item) => [item.tool_call_id, item]));
+  let changed = false;
+  const next = messages.map((message) => {
+    const content = message.content
+      ? markApprovalIn(message.content, actionId, decisions)
+      : undefined;
+    if (!content) {
+      return message;
+    }
+    changed = true;
+    return { ...message, content };
+  });
+  return changed ? next : undefined;
+};

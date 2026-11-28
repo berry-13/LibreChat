@@ -1,4 +1,4 @@
-import { ContentTypes } from 'librechat-data-provider';
+import { ContentTypes, getPendingToolApproval } from 'librechat-data-provider';
 import type {
   Agents,
   PartMetadata,
@@ -182,10 +182,7 @@ const contentPartsToActivity = (
       (part as { runStepStatus?: PartMetadata['runStepStatus'] }).runStepStatus ??
       tool.runStepStatus;
     const waitingForApproval =
-      tool.approval != null &&
-      (tool.output?.length ?? 0) === 0 &&
-      (tool.progress ?? 0) < 1 &&
-      runStepStatus == null;
+      getPendingToolApproval(tool) != null && (tool.progress ?? 0) < 1 && runStepStatus == null;
     const completed = !waitingForApproval && ((tool.progress ?? 0) >= 1 || tool.output != null);
     return [
       {
