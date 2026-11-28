@@ -5,6 +5,17 @@ import type { Document } from 'mongoose';
 export interface IRole extends Document {
   name: string;
   description?: string;
+  /** Internal name reservation while a member migration is in progress. */
+  names?: string[];
+  rename?: {
+    from: string;
+    to: string;
+    token: string;
+    expires: Date;
+    ttlMs?: number;
+    owner?: string;
+    pending?: boolean;
+  };
   permissions: {
     [PermissionTypes.BOOKMARKS]?: {
       [Permissions.USE]?: boolean;

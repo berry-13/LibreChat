@@ -4962,6 +4962,7 @@ export type TChatProjectsConfig = z.infer<typeof chatProjectsConfigSchema>;
 export const permissionWriteAttemptsSchema = z.number().int().min(1).max(100).default(3);
 
 /** How long a holder keeps the per-resource permission lease without renewing it. */
+export const DEFAULT_ROLE_RENAME_LEASE_TTL_MS = 60_000;
 export const permissionLeaseTtlSchema = z.number().int().min(1000).max(600000).default(30000);
 
 /** How long a permission update waits for a contended per-resource lease before answering 409. */
@@ -5053,6 +5054,9 @@ export const configSchema = z.object({
     .object({
       maxWriteAttempts: permissionWriteAttemptsSchema,
       leaseTtlMs: permissionLeaseTtlSchema,
+      roleRenameLeaseTtlMs: permissionLeaseTtlSchema
+        .removeDefault()
+        .default(DEFAULT_ROLE_RENAME_LEASE_TTL_MS),
       leaseWaitMs: permissionLeaseWaitSchema,
     })
     .optional(),

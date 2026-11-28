@@ -20,6 +20,10 @@ type JestReport = { testResults: { assertionResults: JestAssertion[] }[] };
 const JEST = resolve(repoRoot, 'node_modules/.bin/jest');
 const RUNS = {
   methods: { cwd: 'packages/data-schemas', specs: ['src/methods/role.methods.spec.ts'] },
+  rename: {
+    cwd: 'packages/api',
+    specs: ['src/admin/roles.rename.spec.ts', 'src/admin/roles.spec.ts'],
+  },
   handlers: {
     cwd: 'packages/api',
     specs: ['src/admin/roles.integration.spec.ts', 'src/auth/openidRoleSync.integration.spec.ts'],
@@ -138,4 +142,30 @@ test.describe('assigning a role while it is deleted', () => {
       `${PARTITION} moves only the platform role's late members after deleting it, leaving the tenant's`,
     );
   });
+});
+
+test.describe('role membership lifecycle', () => {
+  test.beforeEach(() => {
+    inOneProject();
+    test.setTimeout(330_000);
+  });
+
+  const scenarios = {
+    '@scenario:acknowledged-members-follow-renames': 'rename',
+    '@scenario:confirmed-membership-sweeps-recover': 'methods',
+    '@scenario:recreated-role-members-survive-deletion': 'methods',
+    '@scenario:removal-matches-the-observed-assignment': 'rename',
+    '@scenario:rollback-preserves-later-assignments': 'methods',
+    '@scenario:unconfirmed-grants-keep-the-old-name-reserved': 'rename',
+  } as const;
+
+  for (const [tag, run] of Object.entries(scenarios)) {
+    test(tag, () => {
+      const matches = results(run).filter((entry) => entry.fullName.split(' ').includes(tag));
+      expect(matches.length).toBeGreaterThan(0);
+      for (const assertion of matches) {
+        expect(assertion.status, assertion.fullName).toBe('passed');
+      }
+    });
+  }
 });

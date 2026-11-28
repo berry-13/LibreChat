@@ -6,17 +6,28 @@ describe('permission write retry budget', () => {
     expect(configSchema.parse({ version: '1.3.1', permissions: {} }).permissions).toEqual({
       maxWriteAttempts: 3,
       leaseTtlMs: 30000,
+      roleRenameLeaseTtlMs: 60000,
       leaseWaitMs: 3000,
     });
     expect(
       configSchema.parse({ version: '1.3.1', permissions: { maxWriteAttempts: 7 } }).permissions,
-    ).toEqual({ maxWriteAttempts: 7, leaseTtlMs: 30000, leaseWaitMs: 3000 });
+    ).toEqual({
+      maxWriteAttempts: 7,
+      leaseTtlMs: 30000,
+      roleRenameLeaseTtlMs: 60000,
+      leaseWaitMs: 3000,
+    });
     expect(
       configSchema.parse({
         version: '1.3.1',
-        permissions: { leaseTtlMs: 60000, leaseWaitMs: 5000 },
+        permissions: { leaseTtlMs: 60000, roleRenameLeaseTtlMs: 95000, leaseWaitMs: 5000 },
       }).permissions,
-    ).toEqual({ maxWriteAttempts: 3, leaseTtlMs: 60000, leaseWaitMs: 5000 });
+    ).toEqual({
+      maxWriteAttempts: 3,
+      leaseTtlMs: 60000,
+      roleRenameLeaseTtlMs: 95000,
+      leaseWaitMs: 5000,
+    });
   });
   test.each([NaN, Infinity, -1, 0, 1.5, 101])('rejects %s', (value) => {
     expect(permissionWriteAttemptsSchema.safeParse(value).success).toBe(false);
@@ -25,6 +36,8 @@ describe('permission write retry budget', () => {
 
 describe('permission lease limits', () => {
   test.each([
+    [{ roleRenameLeaseTtlMs: 999 }],
+    [{ roleRenameLeaseTtlMs: 600001 }],
     [{ leaseTtlMs: 999 }],
     [{ leaseTtlMs: 600001 }],
     [{ leaseWaitMs: -1 }],
