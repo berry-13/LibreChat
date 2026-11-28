@@ -5,6 +5,7 @@ import type { MCPServerStatus } from 'librechat-data-provider';
 import type { MCPConnectionView } from '~/hooks/MCP/connection';
 import { getMCPControlState } from '~/components/MCP/mcpServerUtils';
 import { cn, rowActionClasses, rowActionSlotClasses } from '~/utils';
+import Revoke from '~/components/MCP/Revoke';
 import { useLocalize } from '~/hooks';
 
 interface MCPCardActionsProps {
@@ -162,9 +163,11 @@ export default function MCPCardActions({
 
       {/* Revoke button - for OAuth servers (available regardless of connection state) */}
       {serverStatus?.requiresOAuth && onRevoke && (
-        <RowAction label={localize('com_ui_revoke')} onClick={onRevoke}>
-          <Unlink className="text-text-destructive size-4" aria-hidden="true" />
-        </RowAction>
+        <Revoke serverName={serverName} kind="oauth" onConfirm={onRevoke}>
+          <RowAction label={localize('com_ui_revoke')}>
+            <Unlink className="text-text-destructive size-4" aria-hidden="true" />
+          </RowAction>
+        </Revoke>
       )}
     </div>
   );
@@ -173,10 +176,11 @@ export default function MCPCardActions({
 /** A revealed row action with its tooltip: the label is both the tooltip and the name. */
 const RowAction = React.forwardRef<
   HTMLDivElement,
-  { label: string; onClick: (e: React.MouseEvent) => void; children: React.ReactNode }
->(function RowAction({ label, onClick, children }, ref) {
+  { label: string; onClick?: (e: React.MouseEvent) => void; children: React.ReactNode }
+>(function RowAction({ label, children, onClick, ...props }, ref) {
   return (
     <TooltipAnchor
+      {...props}
       ref={ref}
       description={label}
       side="top"

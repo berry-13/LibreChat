@@ -4,6 +4,7 @@ import { Button, Spinner } from '@librechat/client';
 import { useLocalize, useMCPServerManager } from '~/hooks';
 import { useMCPRefresh } from '~/hooks/MCP/useMCPRefresh';
 import { getMCPControlState } from './mcpServerUtils';
+import Revoke from '~/components/MCP/Revoke';
 import { openInNewTab } from '~/utils';
 
 interface ServerInitializationSectionProps {
@@ -133,15 +134,16 @@ export default function ServerInitializationSection({
   return (
     <div className="flex items-center gap-2">
       {shouldShowRevoke && (
-        <Button
-          size="sm"
-          variant="destructive-soft"
-          onClick={() => revokeOAuthForServer?.(serverName)}
-          aria-label={localize('com_ui_revoke')}
+        <Revoke
+          serverName={serverName}
+          kind="oauth"
+          onConfirm={() => revokeOAuthForServer?.(serverName)}
         >
-          <Trash2 className="h-4 w-4" />
-          {localize('com_ui_revoke')}
-        </Button>
+          <Button size="sm" variant="destructive-soft" aria-label={localize('com_ui_revoke')}>
+            <Trash2 className="h-4 w-4" />
+            {localize('com_ui_revoke')}
+          </Button>
+        </Revoke>
       )}
       {(shouldShowReinit || shouldShowInit) && (
         <Button

@@ -7,6 +7,7 @@ import {
   CONFIG_HTML_CLASS_ATTR,
   createConfigHtmlSanitizer,
 } from '~/utils/configHtml';
+import Revoke from '~/components/MCP/Revoke';
 import { useLocalize } from '~/hooks';
 
 interface MCPConfigDialogProps {
@@ -57,12 +58,6 @@ export default function MCPConfigDialog({
 
   const onFormSubmit = (data: Record<string, string>) => {
     onSave(data);
-  };
-
-  const handleRevoke = () => {
-    if (onRevoke) {
-      onRevoke();
-    }
   };
 
   const dialogTitle = localize('com_ui_configure_mcp_variables_for', { 0: serverName });
@@ -133,9 +128,11 @@ export default function MCPConfigDialog({
         }}
         buttons={
           onRevoke && (
-            <Button variant="destructive" onClick={handleRevoke} disabled={isSubmitting}>
-              {localize('com_ui_revoke')}
-            </Button>
+            <Revoke serverName={serverName} kind="credentials" onConfirm={onRevoke}>
+              <Button variant="destructive" disabled={isSubmitting}>
+                {localize('com_ui_revoke')}
+              </Button>
+            </Revoke>
           )
         }
         footerClassName="flex justify-end gap-2 px-6 pb-6 pt-2"

@@ -8,6 +8,7 @@ import {
   createConfigHtmlSanitizer,
 } from '~/utils/configHtml';
 import { useMCPAuthValuesQuery } from '~/data-provider/Tools/queries';
+import Revoke from '~/components/MCP/Revoke';
 import { useLocalize } from '~/hooks';
 
 export interface CustomUserVarConfig {
@@ -171,14 +172,11 @@ export default function CustomUserVarsSection({
       </form>
 
       <div className="flex justify-end gap-2">
-        <Button
-          type="button"
-          variant="destructive-soft"
-          disabled={isSubmitting}
-          onClick={handleRevokeClick}
-        >
-          {localize('com_ui_revoke')}
-        </Button>
+        <Revoke serverName={serverName} kind="credentials" onConfirm={handleRevokeClick}>
+          <Button type="button" variant="destructive-soft" disabled={isSubmitting}>
+            {localize('com_ui_revoke')}
+          </Button>
+        </Revoke>
         <Button
           type="button"
           variant="submit"
